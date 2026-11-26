@@ -1,0 +1,2791 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>פגייה | ניהול אינוונטר ומעקב פילטרים</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Google Fonts: Heebo (Hebrew) + Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Font Awesome 6 Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+
+  <!-- SheetJS for Excel (.xlsx) Import & Export -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+  <!-- Tesseract.js for Sticker OCR -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Heebo', 'Inter', 'sans-serif'],
+          },
+          colors: {
+            medical: {
+              dark: '#0c3554',
+              primary: '#0f5278',
+              teal: '#0d8a8c',
+              light: '#e8f4f8',
+            },
+            burgundy: {
+              DEFAULT: '#800020',
+              dark: '#5e0017',
+              light: '#fdf2f4',
+              border: '#e5b8c2',
+            },
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    body {
+      font-family: 'Heebo', 'Inter', sans-serif;
+      background-color: #f4f7f9;
+      color: #1e293b;
+      -webkit-tap-highlight-color: transparent;
+    }
+    /* Custom scrollbar for horizontal category bar on mobile if needed */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .modal-backdrop {
+      backdrop-filter: blur(4px);
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col pb-20 md:pb-8">
+
+  <!-- ==================== TOP HEADER ==================== -->
+  <header class="bg-medical-dark text-white shadow-lg sticky top-0 z-40 border-b-4 border-burgundy">
+    <div class="max-w-7xl mx-auto px-3 sm:px-6 py-3">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <!-- Brand / Unit Title -->
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-burgundy flex items-center justify-center shadow-md shrink-0">
+            <i class="fa-solid fa-baby text-white text-xl"></i>
+          </div>
+          <div>
+            <h1 class="text-base sm:text-xl font-extrabold leading-tight tracking-tight">
+              אינוונטר פגייה (NICU)
+            </h1>
+            <div class="flex items-center gap-2 text-xs text-sky-200">
+              <span>טיפול נמרץ פגים וילודים</span>
+              <span id="syncBadge" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/10 text-[11px]">
+                <i class="fa-solid fa-circle-notch fa-spin text-sky-300"></i>
+                מתחבר...
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- User & Manager Controls -->
+        <div class="flex items-center gap-2">
+          <!-- Active Staff Selector Button -->
+          <button onclick="openUserModal()" class="flex items-center gap-2 bg-white/10 hover:bg-white/20 active:bg-white/25 transition px-3 py-2 rounded-xl text-xs sm:text-sm font-medium border border-white/15">
+            <i class="fa-solid fa-user-nurse text-teal-300"></i>
+            <span id="headerUserName" class="max-w-[110px] sm:max-w-[160px] truncate">בחר/י שם משתמש</span>
+            <i class="fa-solid fa-chevron-down text-[10px] opacity-75"></i>
+          </button>
+
+          <!-- Manager Lock/Unlock Button -->
+          <button id="managerToggleBtn" onclick="handleManagerToggle()" class="flex items-center gap-1.5 bg-burgundy hover:bg-burgundy-dark transition px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold shadow-sm border border-white/15" title="גישת מנהל">
+            <i id="managerLockIcon" class="fa-solid fa-lock"></i>
+            <span id="managerBtnText" class="hidden sm:inline">מנהל</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Desktop Navigation Tabs -->
+      <nav class="hidden md:flex items-center gap-2 mt-3 pt-2 border-t border-white/10">
+        <button onclick="switchTab('inventory')" id="tabBtn-inventory" class="nav-tab-desktop flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition">
+          <i class="fa-solid fa-boxes-stacked"></i>
+          <span>ניהול אינוונטר מחלקתי</span>
+        </button>
+        <button onclick="switchTab('filters')" id="tabBtn-filters" class="nav-tab-desktop flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition relative">
+          <i class="fa-solid fa-wind"></i>
+          <span>החלפת פילטר באינקובטורים</span>
+          <span id="filterAlertBadgeDesktop" class="hidden bg-red-500 text-white text-xs font-extrabold px-2 py-0.5 rounded-full">0</span>
+        </button>
+        <button onclick="switchTab('dashboard')" id="tabBtn-dashboard" class="nav-tab-desktop flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition">
+          <i class="fa-solid fa-chart-pie"></i>
+          <span>דשבורד, דוחות ולוג פעילות</span>
+        </button>
+
+        <!-- Manager Quick Actions on Desktop -->
+        <div id="managerQuickBar" class="hidden mr-auto flex items-center gap-2">
+          <button onclick="openAddEditModal(null)" class="bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow">
+            <i class="fa-solid fa-plus"></i> מכשיר חדש
+          </button>
+          <button onclick="openStaffManagerModal()" class="bg-white/15 hover:bg-white/25 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5">
+            <i class="fa-solid fa-users-gear"></i> ניהול צוות
+          </button>
+          <button onclick="openExcelImportModal()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow">
+            <i class="fa-solid fa-file-excel"></i> ייבוא Excel
+          </button>
+          <button onclick="openChangePinModal()" class="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow">
+            <i class="fa-solid fa-key"></i> שינוי קוד
+          </button>
+        </div>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Mobile Manager Bar (Visible only when Manager Mode is active on mobile) -->
+  <div id="mobileManagerBar" class="hidden md:hidden bg-burgundy-light border-b border-burgundy-border px-3 py-2 flex items-center justify-between gap-2 overflow-x-auto no-scrollbar">
+    <span class="text-xs font-bold text-burgundy shrink-0"><i class="fa-solid fa-shield-halved ml-1"></i>מצב מנהל:</span>
+    <div class="flex items-center gap-1.5 shrink-0">
+      <button onclick="openAddEditModal(null)" class="bg-medical-teal text-white text-xs font-bold px-3 py-1.5 rounded-lg">
+        <i class="fa-solid fa-plus ml-1"></i>מכשיר
+      </button>
+      <button onclick="openStaffManagerModal()" class="bg-medical-dark text-white text-xs font-bold px-3 py-1.5 rounded-lg">
+        <i class="fa-solid fa-users ml-1"></i>צוות
+      </button>
+      <button onclick="openExcelImportModal()" class="bg-emerald-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg">
+        <i class="fa-solid fa-file-excel ml-1"></i>ייבוא
+      </button>
+      <button onclick="openChangePinModal()" class="bg-amber-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg">
+        <i class="fa-solid fa-key ml-1"></i>קוד
+      </button>
+    </div>
+  </div>
+
+  <!-- ==================== MAIN CONTENT ==================== -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 py-4 sm:py-6">
+
+    <!-- ==================== TAB 1: DEPARTMENT INVENTORY ==================== -->
+    <section id="section-inventory" class="space-y-4">
+      <!-- 9 Dedicated Quick-Filter Category Buttons -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-3 sm:p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm sm:text-base font-bold text-medical-dark flex items-center gap-2">
+            <i class="fa-solid fa-filter text-burgundy"></i>
+            סינון מהיר לפי סוג ציוד
+          </h2>
+          <button onclick="exportToExcel()" class="text-xs sm:text-sm font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5">
+            <i class="fa-solid fa-file-arrow-down"></i>
+            ייצוא לאקסל
+          </button>
+        </div>
+
+        <div id="categoryButtonsGrid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-2.5">
+          <!-- Populated dynamically with the exact 9 categories -->
+        </div>
+      </div>
+
+      <!-- Search & Secondary Filters -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-3 sm:p-4 space-y-3">
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-2.5">
+          <!-- Free Text Search -->
+          <div class="md:col-span-5 relative">
+            <i class="fa-solid fa-magnifying-glass absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input type="text" id="searchInput" oninput="renderInventory()" placeholder="חיפוש לפי מס' אינוונטר, סידורי, דגם, תיאור או מיקום..." class="w-full pr-10 pl-3 py-2.5 rounded-xl border border-slate-300 focus:border-medical-teal focus:ring-2 focus:ring-medical-teal/20 outline-none text-sm" />
+          </div>
+
+          <!-- Status Filter -->
+          <div class="md:col-span-3">
+            <select id="statusFilter" onchange="renderInventory()" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:border-medical-teal outline-none text-sm bg-white">
+              <option value="">כל הסטטוסים</option>
+              <option value="תקין">תקין / פעיל במחלקה</option>
+              <option value="הנדסה רפואית">תקלה / הנדסה רפואית</option>
+              <option value="שליחה עם מטופל">שליחה עם מטופל לב"ח אחר</option>
+              <option value="השאלה">השאלה לב"ח אחר</option>
+              <option value="מושבת">מושבת</option>
+            </select>
+          </div>
+
+          <!-- Room/Location Filter -->
+          <div class="md:col-span-2">
+            <select id="locationFilter" onchange="renderInventory()" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:border-medical-teal outline-none text-sm bg-white">
+              <option value="">כל החדרים/מיקומים</option>
+            </select>
+          </div>
+
+          <!-- Biomedical Maintenance Alert Filter -->
+          <div class="md:col-span-2">
+            <select id="bioAlertFilter" onchange="renderInventory()" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:border-medical-teal outline-none text-sm bg-white">
+              <option value="">כל מועדי מ.רפואי</option>
+              <option value="alert">התראות מ.רפואי (חריגה/קרוב)</option>
+              <option value="overdue">חריגה בלבד (אדום)</option>
+              <option value="soon">תוך 30 יום (כתום)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 pt-1">
+          <span id="inventoryCountLabel" class="font-semibold text-medical-dark">מציג 0 פריטים</span>
+          <button onclick="resetInventoryFilters()" class="text-burgundy hover:underline font-medium">
+            <i class="fa-solid fa-rotate-left ml-1"></i>איפוס סינון
+          </button>
+        </div>
+      </div>
+
+      <!-- Equipment List Grid -->
+      <div id="inventoryGrid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
+        <!-- Populated dynamically -->
+      </div>
+    </section>
+
+    <!-- ==================== TAB 2: INCUBATOR FILTER REPLACEMENT ==================== -->
+    <section id="section-filters" class="hidden space-y-4">
+      <!-- Hero Scan & Check Banner -->
+      <div class="bg-gradient-to-l from-medical-dark via-medical-primary to-medical-teal rounded-2xl p-4 sm:p-6 text-white shadow-md relative overflow-hidden">
+        <div class="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div class="space-y-1.5">
+            <div class="inline-flex items-center gap-1.5 bg-burgundy text-white text-xs font-bold px-3 py-1 rounded-full">
+              <i class="fa-solid fa-calendar-check"></i>
+              נוהל החלפה: אחת ל-3 חודשים (90 יום)
+            </div>
+            <h2 class="text-xl sm:text-2xl font-extrabold">מעקב החלפת פילטר אוויר באינקובטורים</h2>
+            <p class="text-xs sm:text-sm text-sky-100 max-w-2xl">
+              מציג אך ורק אינקובטורים סגורים בעלי פילטר אוויר (אינקובטור לתינוק / אינקובטור). סרקי או צלמי את מדבקת מספר האינוונטר לקבלת חיווי מיידי ותיעוד ההחלפה.
+            </p>
+          </div>
+
+          <!-- Primary CTA for Nursing Aides -->
+          <div class="w-full md:w-auto flex flex-col sm:flex-row gap-2.5 shrink-0">
+            <button onclick="openFilterScannerModal(null)" class="w-full md:w-auto bg-white text-burgundy hover:bg-burgundy-light active:scale-[0.98] transition font-extrabold text-sm sm:text-base px-5 py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-2.5 border-2 border-burgundy/20">
+              <i class="fa-solid fa-camera text-xl"></i>
+              <span>סריקה / צילום מדבקת אינקובטור</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Traffic Light Summary & Filter Bar -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+        <button onclick="setFilterTraffic('all')" id="trafficBtn-all" class="traffic-btn bg-white border-2 border-medical-dark rounded-2xl p-3 text-right shadow-sm transition">
+          <div class="text-xs text-slate-500 font-semibold">סה"כ אינקובטורים</div>
+          <div id="countFilterAll" class="text-2xl font-extrabold text-medical-dark mt-0.5">0</div>
+        </button>
+        <button onclick="setFilterTraffic('red')" id="trafficBtn-red" class="traffic-btn bg-red-50 border-2 border-transparent hover:border-red-400 rounded-2xl p-3 text-right shadow-sm transition">
+          <div class="text-xs text-red-700 font-bold flex items-center gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse"></span>
+            חריגה / דחוף (90+ יום)
+          </div>
+          <div id="countFilterRed" class="text-2xl font-extrabold text-red-700 mt-0.5">0</div>
+        </button>
+        <button onclick="setFilterTraffic('orange')" id="trafficBtn-orange" class="traffic-btn bg-amber-50 border-2 border-transparent hover:border-amber-400 rounded-2xl p-3 text-right shadow-sm transition">
+          <div class="text-xs text-amber-800 font-bold flex items-center gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+            מתקרב (14 יום קדימה)
+          </div>
+          <div id="countFilterOrange" class="text-2xl font-extrabold text-amber-700 mt-0.5">0</div>
+        </button>
+        <button onclick="setFilterTraffic('green')" id="trafficBtn-green" class="traffic-btn bg-emerald-50 border-2 border-transparent hover:border-emerald-400 rounded-2xl p-3 text-right shadow-sm transition">
+          <div class="text-xs text-emerald-800 font-bold flex items-center gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+            תקין (&gt;14 יום)
+          </div>
+          <div id="countFilterGreen" class="text-2xl font-extrabold text-emerald-700 mt-0.5">0</div>
+        </button>
+      </div>
+
+      <!-- Search Incubators -->
+      <div class="relative">
+        <i class="fa-solid fa-magnifying-glass absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400"></i>
+        <input type="text" id="incubatorSearchInput" oninput="renderIncubatorFilters()" placeholder="חיפוש אינקובטור לפי מס' אינוונטר, חדר או דגם..." class="w-full pr-10 pl-3 py-2.5 rounded-xl border border-slate-300 bg-white focus:border-medical-teal outline-none text-sm shadow-sm" />
+      </div>
+
+      <!-- Incubator Cards Grid -->
+      <div id="incubatorsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <!-- Populated dynamically -->
+      </div>
+    </section>
+
+    <!-- ==================== TAB 3: DASHBOARD, REPORTS & LOGS ==================== -->
+    <section id="section-dashboard" class="hidden space-y-5">
+      <!-- Top KPI Summary Cards -->
+      <div class="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 border-r-4 border-r-medical-dark">
+          <div class="text-xs font-semibold text-slate-500">סה"כ ציוד במחלקה</div>
+          <div id="kpiTotal" class="text-3xl font-extrabold text-medical-dark mt-1">0</div>
+          <div class="text-[11px] text-slate-400 mt-1">פעיל ורשום באינוונטר</div>
+        </div>
+
+        <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 border-r-4 border-r-amber-500">
+          <div class="text-xs font-semibold text-slate-500">בתיקון / השאלה / שליחה</div>
+          <div id="kpiOut" class="text-3xl font-extrabold text-amber-600 mt-1">0</div>
+          <div class="text-[11px] text-slate-400 mt-1">הנדסה רפואית או מחוץ למחלקה</div>
+        </div>
+
+        <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 border-r-4 border-r-emerald-500">
+          <div class="text-xs font-semibold text-slate-500">אינקובטורים תקינים (פילטר)</div>
+          <div id="kpiIncGreen" class="text-3xl font-extrabold text-emerald-600 mt-1">0</div>
+          <div class="text-[11px] text-slate-400 mt-1">מועד החלפה רחוק מ-14 יום</div>
+        </div>
+
+        <div class="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 border-r-4 border-r-red-600">
+          <div class="text-xs font-semibold text-slate-500">אינקובטורים להחלפת פילטר</div>
+          <div id="kpiIncDue" class="text-3xl font-extrabold text-red-600 mt-1">0</div>
+          <div class="text-[11px] text-slate-400 mt-1">בטווח שבועיים או בחריגה</div>
+        </div>
+
+        <div class="col-span-2 lg:col-span-1 bg-white rounded-2xl p-4 shadow-sm border border-slate-200 border-r-4 border-r-burgundy">
+          <div class="text-xs font-semibold text-slate-500">התראות מ.רפואי</div>
+          <div id="kpiBioAlerts" class="text-3xl font-extrabold text-burgundy mt-1">0</div>
+          <div class="text-[11px] text-slate-400 mt-1">טיפול תקופתי קרוב/בחריגה</div>
+        </div>
+      </div>
+
+      <!-- Reports & Logs Controls -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          <div>
+            <h2 class="text-lg font-extrabold text-medical-dark flex items-center gap-2">
+              <i class="fa-solid fa-clock-rotate-left text-burgundy"></i>
+              היסטוריית פעילות והחלפות פילטרים
+            </h2>
+            <p class="text-xs text-slate-500">תיעוד מלא הכולל שם מבצע/ת, תאריך ושעה, ותמונות מדבקות שצולמו</p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <button onclick="exportToExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs sm:text-sm font-bold px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-sm">
+              <i class="fa-solid fa-file-excel"></i>
+              ייצוא דוח מלא ל-Excel
+            </button>
+          </div>
+        </div>
+
+        <!-- Log Filters -->
+        <div class="flex flex-wrap items-center gap-2">
+          <button onclick="setLogFilter('all')" id="logFilterBtn-all" class="log-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold bg-medical-dark text-white transition">כל הפעולות</button>
+          <button onclick="setLogFilter('filter')" id="logFilterBtn-filter" class="log-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">החלפות פילטר בלבד</button>
+          <button onclick="setLogFilter('status')" id="logFilterBtn-status" class="log-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition">שינויי סטטוס ומיקום</button>
+
+          <div class="mr-auto w-full sm:w-64 relative">
+            <i class="fa-solid fa-search absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+            <input type="text" id="logSearchInput" oninput="renderDashboard()" placeholder="חיפוש בלוג (מבצע, מס' ציוד)..." class="w-full pr-8 pl-3 py-1.5 rounded-xl border border-slate-300 text-xs outline-none focus:border-medical-teal" />
+          </div>
+        </div>
+
+        <!-- Logs Table (Responsive) -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-right border-collapse">
+            <thead>
+              <tr class="bg-slate-50 text-slate-600 text-xs border-y border-slate-200">
+                <th class="py-3 px-3 font-bold">תאריך ושעה</th>
+                <th class="py-3 px-3 font-bold">מס' אינוונטר</th>
+                <th class="py-3 px-3 font-bold">סוג פעולה</th>
+                <th class="py-3 px-3 font-bold">פירוט</th>
+                <th class="py-3 px-3 font-bold">שם מבצע/ת</th>
+                <th class="py-3 px-3 font-bold text-center">תמונת מדבקה</th>
+              </tr>
+            </thead>
+            <tbody id="logsTableBody" class="divide-y divide-slate-100 text-xs sm:text-sm">
+              <!-- Populated dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ==================== MOBILE BOTTOM NAVIGATION ==================== -->
+  <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 shadow-[0_-4px_12px_rgba(0,0,0,0.06)] z-40 grid grid-cols-3">
+    <button onclick="switchTab('inventory')" id="mobTabBtn-inventory" class="nav-tab-mobile flex flex-col items-center justify-center py-2.5 text-xs font-bold text-medical-dark border-t-2 border-burgundy">
+      <i class="fa-solid fa-boxes-stacked text-lg mb-0.5"></i>
+      <span>אינוונטר</span>
+    </button>
+    <button onclick="switchTab('filters')" id="mobTabBtn-filters" class="nav-tab-mobile flex flex-col items-center justify-center py-2.5 text-xs font-bold text-slate-500 border-t-2 border-transparent relative">
+      <div class="relative">
+        <i class="fa-solid fa-wind text-lg mb-0.5"></i>
+        <span id="filterAlertBadgeMobile" class="hidden absolute -top-1.5 -left-3 bg-red-600 text-white text-[10px] font-extrabold px-1.5 rounded-full">0</span>
+      </div>
+      <span>פילטרים</span>
+    </button>
+    <button onclick="switchTab('dashboard')" id="mobTabBtn-dashboard" class="nav-tab-mobile flex flex-col items-center justify-center py-2.5 text-xs font-bold text-slate-500 border-t-2 border-transparent">
+      <i class="fa-solid fa-chart-pie text-lg mb-0.5"></i>
+      <span>דשבורד ולוג</span>
+    </button>
+  </nav>
+
+  <!-- ==================== MODALS ==================== -->
+
+  <!-- 1. User Selection Modal -->
+  <div id="userModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 modal-backdrop flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-5 space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 class="text-lg font-extrabold text-medical-dark flex items-center gap-2">
+          <i class="fa-solid fa-user-nurse text-burgundy"></i>
+          זיהוי צוות סיעודי / כוח עזר
+        </h3>
+        <button onclick="closeModal('userModal')" class="text-slate-400 hover:text-slate-600 p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <p class="text-xs text-slate-500">השם שייבחר יירשם אוטומטית בלוג הפעילות עבור כל עדכון סטטוס או החלפת פילטר.</p>
+
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">בחירה מרשימת הצוות הקיימת:</label>
+          <select id="userSelectDropdown" onchange="document.getElementById('userFreeText').value = this.value" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white focus:border-medical-teal outline-none">
+            <option value="">-- בחר/י מרשימה --</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">או הזנה חופשית של שם מלא:</label>
+          <input type="text" id="userFreeText" placeholder="לדוגמה: שרה כהן (כוח עזר)" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:border-medical-teal outline-none" />
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="closeModal('userModal')" class="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100">ביטול</button>
+        <button onclick="saveActiveUser()" class="px-5 py-2 rounded-xl text-sm font-bold bg-medical-dark hover:bg-medical-primary text-white shadow">שמירה</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Manager Login Modal -->
+  <div id="managerLoginModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 modal-backdrop flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-5 space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 class="text-lg font-extrabold text-burgundy flex items-center gap-2">
+          <i class="fa-solid fa-shield-halved"></i>
+          כניסת מנהל מחלקה
+        </h3>
+        <button onclick="closeModal('managerLoginModal')" class="text-slate-400 hover:text-slate-600 p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <p class="text-xs text-slate-600">הזן קוד מנהל לפתיחת הרשאות הוספה/גריעת ציוד, עריכת נתוני יסוד, ייבוא Excel וניהול רשימת הצוות.</p>
+      <div>
+        <label class="block text-xs font-bold text-slate-700 mb-1">קוד מנהל:</label>
+        <input type="password" id="managerPinInput" onkeydown="if(event.key==='Enter') verifyManagerPin()" placeholder="הזן קוד..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-center text-lg tracking-widest font-bold focus:border-burgundy outline-none" />
+        <p id="managerPinError" class="hidden text-xs text-red-600 font-semibold mt-1">קוד שגוי, נסה שוב.</p>
+      </div>
+      <div class="flex justify-end gap-2 pt-1">
+        <button onclick="closeModal('managerLoginModal')" class="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100">ביטול</button>
+        <button onclick="verifyManagerPin()" class="px-5 py-2 rounded-xl text-sm font-bold bg-burgundy hover:bg-burgundy-dark text-white shadow">כניסה</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Status & Location Update Modal -->
+  <div id="statusModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 modal-backdrop flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-5 space-y-4 my-auto">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div>
+          <h3 class="text-base sm:text-lg font-extrabold text-medical-dark">עדכון סטטוס ומיקום מכשיר</h3>
+          <p id="statusModalSubtitle" class="text-xs text-slate-500 font-medium"></p>
+        </div>
+        <button onclick="closeModal('statusModal')" class="text-slate-400 hover:text-slate-600 p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <input type="hidden" id="statusEqId" />
+
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1.5">בחר פעולה / סטטוס חדש:</label>
+          <select id="statusActionSelect" onchange="onStatusActionChange()" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold bg-white focus:border-medical-teal outline-none">
+            <option value="תקין">✅ תקין / פעיל במחלקה (עדכון חדר/אשכול)</option>
+            <option value="הנדסה רפואית">🔧 דיווח על תקלה והעברה להנדסה רפואית</option>
+            <option value="שליחה עם מטופל">🚑 שליחה עם מטופל לבית חולים אחר</option>
+            <option value="השאלה">🏥 השאלת מכשיר לבית חולים אחר</option>
+            <option value="מושבת">⛔ השבתת מכשיר</option>
+            <option value="החזרה">↩️ החזרת מכשיר למחלקה (לסטטוס תקין)</option>
+          </select>
+        </div>
+
+        <!-- Dynamic Fields based on selected action -->
+        <div id="fieldLocationWrap">
+          <label class="block text-xs font-bold text-slate-700 mb-1">חדר / אשכול / מיקום במחלקה:</label>
+          <input type="text" id="statusNewLocation" placeholder="לדוגמה: חדר 2 / אשכול א / מחסן ציוד" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:border-medical-teal outline-none" />
+        </div>
+
+        <div id="fieldFaultWrap" class="hidden">
+          <label class="block text-xs font-bold text-red-700 mb-1">תיאור התקלה (חובה לדיווח הנדסה רפואית):</label>
+          <textarea id="statusFaultDesc" rows="2" placeholder="פרט/י את מהות התקלה..." class="w-full px-3 py-2 rounded-xl border border-red-300 text-sm focus:border-red-500 outline-none"></textarea>
+        </div>
+
+        <div id="fieldHospitalWrap" class="hidden space-y-2.5">
+          <div>
+            <label id="hospitalFieldLabel" class="block text-xs font-bold text-slate-700 mb-1">בית החולים המקבל / השואל:</label>
+            <input type="text" id="statusHospitalName" placeholder="שם בית החולים..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:border-medical-teal outline-none" />
+          </div>
+          <div>
+            <label id="hospitalExtraLabel" class="block text-xs font-bold text-slate-700 mb-1">תאריך שליחה / איש קשר והערה:</label>
+            <input type="text" id="statusHospitalExtra" placeholder="תאריך או שם איש קשר..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:border-medical-teal outline-none" />
+          </div>
+        </div>
+
+        <div id="fieldDecommissionWrap" class="hidden">
+          <label class="block text-xs font-bold text-slate-700 mb-1">סיבת השבתה:</label>
+          <input type="text" id="statusDecommissionReason" placeholder="לדוגמה: בלאי סופי / חסר חלק חילוף" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:border-medical-teal outline-none" />
+        </div>
+
+        <!-- Performer Name (Mandatory) -->
+        <div class="bg-slate-50 p-3 rounded-xl border border-slate-200">
+          <label class="block text-xs font-bold text-medical-dark mb-1">שם מבצע/ת העדכון (חובה):</label>
+          <input type="text" id="statusPerformerName" placeholder="הזן/י שם מלא..." class="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white focus:border-medical-teal outline-none" />
+          <p id="statusModalError" class="hidden text-xs text-red-600 font-bold mt-1.5"></p>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="closeModal('statusModal')" class="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100">ביטול</button>
+        <button onclick="submitStatusUpdate()" class="px-5 py-2.5 rounded-xl text-sm font-bold bg-medical-dark hover:bg-medical-primary text-white shadow">שמירת עדכון</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Incubator Sticker Scan, OCR & Filter Replacement Modal -->
+  <div id="filterScanModal" class="hidden fixed inset-0 z-50 bg-slate-900/70 modal-backdrop flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-4 sm:p-6 space-y-4 my-auto max-h-[94vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 class="text-base sm:text-lg font-extrabold text-medical-dark flex items-center gap-2">
+          <i class="fa-solid fa-camera text-burgundy"></i>
+          בדיקה ותיעוד החלפת פילטר
+        </h3>
+        <button onclick="closeModal('filterScanModal')" class="text-slate-400 hover:text-slate-600 p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <!-- Step 1: Capture / Upload Sticker Photo -->
+      <div class="space-y-2">
+        <label class="block text-xs font-bold text-slate-700">1. צילום מדבקת מספר האינוונטר שעל האינקובטור:</label>
+        <div class="flex flex-col items-center justify-center border-2 border-dashed border-medical-teal/50 bg-medical-light/40 rounded-2xl p-4 text-center relative">
+          <input type="file" id="stickerFileInput" accept="image/*" capture="environment" onchange="handleStickerImageUpload(event)" class="hidden" />
+          <img id="stickerPreviewImg" class="hidden max-h-44 rounded-xl shadow-sm mb-3 object-contain border border-slate-200" alt="תצוגה מקדימה של מדבקה" />
+          <div id="ocrSpinner" class="hidden items-center gap-2 text-xs font-bold text-medical-primary mb-2 bg-white px-3 py-1.5 rounded-full shadow-sm">
+            <i class="fa-solid fa-spinner fa-spin"></i>
+            מפענח מספר אינוונטר מהמדבקה (OCR)...
+          </div>
+          <button type="button" onclick="document.getElementById('stickerFileInput').click()" class="bg-medical-teal hover:bg-medical-primary text-white font-bold text-sm px-4 py-2.5 rounded-xl shadow flex items-center gap-2 transition">
+            <i class="fa-solid fa-camera"></i>
+            <span id="stickerBtnLabel">צלם / העלה תמונת מדבקה</span>
+          </button>
+          <p id="ocrStatusMsg" class="text-[11px] text-slate-500 mt-1.5">התמונה תישמר כהוכחה בתיעוד ההחלפה</p>
+        </div>
+      </div>
+
+      <!-- Step 2: Verify / Select Incubator Number -->
+      <div class="space-y-2">
+        <label class="block text-xs font-bold text-slate-700">2. אימות / בחירת מספר אינוונטר של האינקובטור:</label>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <input type="text" id="scanInvInput" oninput="matchIncubatorByNumber(this.value)" placeholder="הקלד/י מס' אינוונטר..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm font-bold focus:border-medical-teal outline-none" />
+          <select id="scanIncubatorSelect" onchange="onSelectIncubatorDropdown(this.value)" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm bg-white focus:border-medical-teal outline-none">
+            <option value="">-- או בחר/י מהרשימה --</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Step 3: Instant Traffic-Light Status Alert -->
+      <div id="scanResultBox" class="hidden rounded-2xl p-4 border-2 space-y-2">
+        <div class="flex items-start gap-3">
+          <div id="scanResultIcon" class="text-2xl shrink-0 mt-0.5"></div>
+          <div class="flex-1">
+            <div id="scanResultTitle" class="font-extrabold text-sm sm:text-base"></div>
+            <div id="scanResultDesc" class="text-xs mt-1 leading-relaxed"></div>
+          </div>
+        </div>
+        <div id="scanActionPromptWrap" class="pt-1">
+          <button type="button" onclick="revealFilterConfirmForm()" id="btnStartFilterDoc" class="w-full py-2.5 rounded-xl font-extrabold text-sm shadow transition flex items-center justify-center gap-2">
+            <i class="fa-solid fa-check-double"></i>
+            תיעוד החלפת פילטר עכשיו
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 4: Mandatory Confirmation Form (Staff Name + Save) -->
+      <div id="filterConfirmForm" class="hidden bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+        <h4 class="text-sm font-extrabold text-medical-dark flex items-center gap-1.5">
+          <i class="fa-solid fa-signature text-burgundy"></i>
+          אישור ותיעוד ביצוע החלפת פילטר
+        </h4>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">בחירת שם כוח העזר / אחות מהרשימה:</label>
+          <select id="filterStaffSelect" onchange="document.getElementById('filterStaffInput').value = this.value" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white mb-2">
+            <option value="">-- בחר/י שם מהרשימה --</option>
+          </select>
+          <label class="block text-xs font-bold text-burgundy mb-1">שם מלא של מבצעת ההחלפה (שדה חובה *):</label>
+          <input type="text" id="filterStaffInput" placeholder="חובה להזין שם מלא לשמירה..." class="w-full px-3 py-2.5 rounded-xl border-2 border-burgundy/40 text-sm font-semibold bg-white focus:border-burgundy outline-none" />
+          <p id="filterFormError" class="hidden text-xs text-red-600 font-bold mt-1"></p>
+        </div>
+
+        <button type="button" onclick="saveFilterReplacement()" class="w-full py-3 rounded-xl bg-burgundy hover:bg-burgundy-dark text-white font-extrabold text-sm shadow-md transition flex items-center justify-center gap-2">
+          <i class="fa-solid fa-floppy-disk"></i>
+          שמור תיעוד החלפה ועדכן ל-90 יום קדימה
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Manager Add/Edit Equipment Modal -->
+  <div id="addEditModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 modal-backdrop flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-5 space-y-4 my-auto max-h-[92vh] overflow-y-auto">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 id="addEditModalTitle" class="text-lg font-extrabold text-medical-dark">הוספת מכשיר חדש</h3>
+        <button onclick="closeModal('addEditModal')" class="text-slate-400 hover:text-slate-600 p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <input type="hidden" id="editEqId" />
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">מספר ציוד / אינוונטר *</label>
+          <input type="text" id="eqInvNum" class="w-full px-3 py-2 rounded-xl border border-slate-300 outline-none focus:border-medical-teal" required />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">סוג ציוד *</label>
+          <input type="text" id="eqType" list="equipmentTypesDatalist" class="w-full px-3 py-2 rounded-xl border border-slate-300 outline-none focus:border-medical-teal" placeholder="בחר/י או הקלד/י סוג ציוד" />
+          <datalist id="equipmentTypesDatalist"></datalist>
+        </div>
+        <div class="sm:col-span-2">
+          <label class="block text-xs font-bold text-slate-700 mb-1">תיאור ציוד</label>
+          <input type="text" id="eqDesc" class="w-full px-3 py-2 rounded-xl border border-slate-300 outline-none focus:border-medical-teal" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">יצרן</label>
+          <input type="text" id="eqManufacturer" class="w-full px-3 py-2 rounded-xl border border-slate-300 outline-none focus:border-medical-teal" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">דגם</label>
+          <input type="text" id="eqModel" class="w-full px-3 py-2 rounded-xl border border-slate-300 outline-none focus:border-medical-teal" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">מס' סידורי</label>
+          <input type="text" id="eqSerial" class="w-full px-3 py-2 rounded-xl border border-slate-300 outline-none focus:border-medical-teal" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">יחידה</label>
+          <input type="text" id="eqUnit" value="פגייה - טיפול נמרץ ילודים" class="w-full px-3 py-2 rounded-xl border border-slate-300 outline-none focus:border-medical-teal" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">חדר</label>
+          <input type="text" id="eqRoom" class="w-full px-3 py-2 rounded-xl border border-slate-300 outline-none focus:border-medical-teal" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">תיאור חדר / מיקום</label>
+          <input type="text" id="eqLocation" class="w-full px-3 py-2 rounded-xl border border-slate-300 outline-none focus:border-medical-teal" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">תדירות טיפול בימים (מ.רפואי)</label>
+          <input type="number" id="eqMaintFreq" value="365" class="w-full px-3 py-2 rounded-xl border border-slate-300 outline-none focus:border-medical-teal" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">תאריך טיפול אחרון (מ.רפואי)</label>
+          <input type="date" id="eqLastMaint" class="w-full px-3 py-2 rounded-xl border border-slate-300 outline-none focus:border-medical-teal" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">תאריך טיפול הבא (מ.רפואי)</label>
+          <input type="date" id="eqNextMaint" class="w-full px-3 py-2 rounded-xl border border-slate-300 outline-none focus:border-medical-teal" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">תאריך החלפת פילטר אחרון (לאינקובטור)</label>
+          <input type="date" id="eqLastFilter" class="w-full px-3 py-2 rounded-xl border border-slate-300 outline-none focus:border-medical-teal" />
+        </div>
+      </div>
+
+      <p id="addEditError" class="hidden text-xs text-red-600 font-bold"></p>
+
+      <div class="flex items-center justify-between pt-3 border-t border-slate-100">
+        <button id="deleteEqBtn" onclick="confirmDeleteEquipment()" class="hidden px-4 py-2 rounded-xl text-xs sm:text-sm font-bold text-red-600 bg-red-50 hover:bg-red-100">
+          <i class="fa-solid fa-trash-can ml-1"></i>גריעת מכשיר
+        </button>
+        <div class="flex gap-2 mr-auto">
+          <button onclick="closeModal('addEditModal')" class="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100">ביטול</button>
+          <button onclick="saveEquipmentForm()" class="px-5 py-2 rounded-xl text-sm font-bold bg-medical-dark hover:bg-medical-primary text-white shadow">שמירה</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. Excel Import Modal -->
+  <div id="excelImportModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 modal-backdrop flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-5 space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 class="text-lg font-extrabold text-emerald-700 flex items-center gap-2">
+          <i class="fa-solid fa-file-excel"></i>
+          ייבוא קובץ Excel (.xlsx)
+        </h3>
+        <button onclick="closeModal('excelImportModal')" class="text-slate-400 hover:text-slate-600 p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <p class="text-xs text-slate-600 leading-relaxed">
+        בחר/י קובץ אקסל (כגון <strong>אינוונטר 11.26.xlsx</strong>). המערכת מזהה אוטומטית את שורת הכותרות ואת כל עמודות האינוונטר (מספר ציוד/אינוונטר, סוג ציוד, יצרן, דגם, חדר, תאריך טיפול הבא מ.רפואי וכו').
+      </p>
+
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">אופן הייבוא:</label>
+          <select id="importModeSelect" class="w-full px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white">
+            <option value="merge">מיזוג ועדכון (שומר היסטוריית פילטרים קיימת ומעדכן/מוסיף)</option>
+            <option value="replace">החלפה מלאה של רשימת הציוד בקובץ החדש</option>
+          </select>
+        </div>
+        <input type="file" id="excelFileInput" accept=".xlsx,.xls,.csv" class="block w-full text-xs text-slate-600 file:ml-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 border border-slate-200 rounded-xl p-1.5" />
+      </div>
+
+      <div id="importProgressMsg" class="hidden text-xs font-bold text-medical-primary bg-medical-light p-2.5 rounded-xl flex items-center gap-2">
+        <i class="fa-solid fa-spinner fa-spin"></i>
+        <span>מעבד ומסנכרן נתונים...</span>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="closeModal('excelImportModal')" class="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100">ביטול</button>
+        <button onclick="processExcelImport()" class="px-5 py-2 rounded-xl text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow">התחל ייבוא</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. Staff Management Modal (Manager) -->
+  <div id="staffManagerModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 modal-backdrop flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-5 space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 class="text-lg font-extrabold text-medical-dark flex items-center gap-2">
+          <i class="fa-solid fa-users-gear text-burgundy"></i>
+          ניהול רשימת צוות וכוחות עזר
+        </h3>
+        <button onclick="closeModal('staffManagerModal')" class="text-slate-400 hover:text-slate-600 p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <div class="flex gap-2">
+        <input type="text" id="newStaffNameInput" placeholder="הוסף שם מלא (לדוגמה: מיכל לוי - כוח עזר)" class="flex-1 px-3 py-2 rounded-xl border border-slate-300 text-sm outline-none focus:border-medical-teal" />
+        <button onclick="addStaffMember()" class="bg-medical-teal hover:bg-medical-primary text-white font-bold text-sm px-4 py-2 rounded-xl">הוסף</button>
+      </div>
+
+      <div id="staffManagerList" class="max-h-60 overflow-y-auto divide-y divide-slate-100 border border-slate-200 rounded-xl">
+        <!-- Populated dynamically -->
+      </div>
+
+      <div class="flex justify-end">
+        <button onclick="closeModal('staffManagerModal')" class="px-5 py-2 rounded-xl text-sm font-bold bg-medical-dark text-white">סגור</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7b. Change Manager PIN Modal -->
+  <div id="changePinModal" class="hidden fixed inset-0 z-50 bg-slate-900/60 modal-backdrop flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-5 space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 class="text-lg font-extrabold text-burgundy flex items-center gap-2">
+          <i class="fa-solid fa-key"></i>
+          שינוי קוד מנהל
+        </h3>
+        <button onclick="closeModal('changePinModal')" class="text-slate-400 hover:text-slate-600 p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">קוד מנהל נוכחי:</label>
+          <input type="password" id="currentPinInput" placeholder="הזן קוד נוכחי..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-center tracking-widest font-bold focus:border-burgundy outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">קוד מנהל חדש (לפחות 4 תווים):</label>
+          <input type="password" id="newPinInput" placeholder="הזן קוד חדש..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-center tracking-widest font-bold focus:border-burgundy outline-none" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1">אימות קוד חדש:</label>
+          <input type="password" id="confirmPinInput" onkeydown="if(event.key==='Enter') saveNewManagerPin()" placeholder="הזן שוב את הקוד החדש..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-center tracking-widest font-bold focus:border-burgundy outline-none" />
+        </div>
+        <p id="changePinError" class="hidden text-xs text-red-600 font-bold"></p>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-1">
+        <button onclick="closeModal('changePinModal')" class="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100">ביטול</button>
+        <button onclick="saveNewManagerPin()" class="px-5 py-2 rounded-xl text-sm font-bold bg-burgundy hover:bg-burgundy-dark text-white shadow">שמור קוד חדש</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 8. Confirm Dialog Modal (Replaces window.confirm) -->
+  <div id="confirmModal" class="hidden fixed inset-0 z-[60] bg-slate-900/70 modal-backdrop flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-5 space-y-4">
+      <h3 id="confirmModalTitle" class="text-base font-extrabold text-red-700">אישור פעולה</h3>
+      <p id="confirmModalMsg" class="text-sm text-slate-600"></p>
+      <div class="flex justify-end gap-2">
+        <button onclick="closeModal('confirmModal')" class="px-4 py-2 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100">ביטול</button>
+        <button id="confirmModalOkBtn" class="px-5 py-2 rounded-xl text-sm font-bold bg-red-600 hover:bg-red-700 text-white shadow">אישור</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 9. Image Lightbox Modal -->
+  <div id="lightboxModal" onclick="closeModal('lightboxModal')" class="hidden fixed inset-0 z-[60] bg-slate-900/85 modal-backdrop flex items-center justify-center p-4">
+    <div class="relative max-w-2xl w-full bg-white rounded-2xl p-3 shadow-2xl" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between mb-2 px-1">
+        <span id="lightboxCaption" class="text-xs sm:text-sm font-bold text-medical-dark"></span>
+        <button onclick="closeModal('lightboxModal')" class="text-slate-500 hover:text-slate-800 p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <img id="lightboxImg" src="" alt="תמונת מדבקה" class="w-full max-h-[75vh] object-contain rounded-xl bg-slate-100" />
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="fixed top-4 left-4 z-[70] space-y-2 pointer-events-none"></div>
+
+  <!-- ==================== APPLICATION LOGIC & FIREBASE ==================== -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import {
+      getFirestore,
+      collection,
+      doc,
+      setDoc,
+      updateDoc,
+      deleteDoc,
+      addDoc,
+      onSnapshot,
+      writeBatch
+    } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // ==================== CONSTANTS & CATEGORY DEFINITIONS ====================
+    const CATEGORIES = [
+      { id: 'all', name: 'הכל', icon: 'fa-layer-group', types: null },
+      {
+        id: 'incubators',
+        name: 'אינקובטורים ועריסות חימום',
+        icon: 'fa-baby-carriage',
+        types: ['אינקובטור לתינוק', 'אינקובטור פתוח', 'אינקובטור', 'מכשיר חימום לתינוקות']
+      },
+      {
+        id: 'pumps',
+        name: 'משאבות מזרק, עירוי והזנה',
+        icon: 'fa-syringe',
+        types: ['משאבות מזרק', 'משאבת עירוי', 'משאבת הזנה']
+      },
+      {
+        id: 'respiratory',
+        name: 'מכשירי הנשמה, מעשירי לחות וזרימה גבוהה',
+        icon: 'fa-lungs',
+        types: ['מכשיר הנשמה', 'מנשם מכאני', 'מעשיר לחות', 'מערבל אוויר/חמצן', 'זרימה גבוהה בהנשמה', 'מודד נייטרוס/אוקסיד', 'משעל']
+      },
+      {
+        id: 'monitors',
+        name: 'מוניטורים, אוקסימטרים ובקרה',
+        icon: 'fa-heart-pulse',
+        types: ['מוניטור רב פרמטרים', 'אוקסימטר', 'מוניטור חמצן', 'מודול למוניטור', 'בקרה מרכזית-ט.נמרץ', 'א.ק.ג רב ערוצי', 'דפיברילטור מוניטור']
+      },
+      {
+        id: 'phototherapy',
+        name: 'טיפול באור (בילירובין)',
+        icon: 'fa-sun',
+        types: ['מכשיר הרדת בילירובין', 'בילורובין לא פולשני']
+      },
+      {
+        id: 'imaging',
+        name: 'הדמיה, אולטרסאונד ונוירולוגיה',
+        icon: 'fa-wave-square',
+        types: ['אלקטרואנציפולוגרף', 'מתמרי אולטרסאונד', 'אולטרסאונד קרדיולוגי', 'אולטרא סאונד נייד', 'גלאי דיגיטלי לדימות', 'ניידת צילום דיגיטלית', 'אופטלמוסקופ', 'אנדוסקופ לאינטובציה']
+      },
+      {
+        id: 'cold',
+        name: 'מקררים, מקפיאים ומשאבות חלב',
+        icon: 'fa-snowflake',
+        types: ['מקרר תרופות', 'מקפיא', 'משאבות חלב']
+      },
+      {
+        id: 'lab_general',
+        name: 'ציוד מעבדה וכללי',
+        icon: 'fa-flask',
+        types: ['מ.לגילוי ורידים', "מ' קירור/חימום לחולה", 'מנורת בדיקה', 'מנדף ביולוגי', 'מאבחן לגזים בדם', 'מכשיר שאיבה', 'צנטריפוגה המטוקריט', 'מחמם נוזלים']
+      }
+    ];
+
+    // Only closed incubators require the 90-day air filter replacement
+    const FILTER_INCUBATOR_TYPES = ['אינקובטור לתינוק', 'אינקובטור'];
+    const ALL_KNOWN_TYPES = CATEGORIES.filter(c => c.types).flatMap(c => c.types);
+
+    // ==================== APPLICATION STATE ====================
+    let db = null;
+    let auth = null;
+    let currentUser = null;
+    let useCloud = false;
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'nicu-inventory-app';
+
+    let state = {
+      equipment: [],
+      logs: [],
+      staffList: [
+        ' (כוח עזר)',
+        'מרים לוי (כוח עזר)',
+        'אילנה אברהם (כוח עזר)',
+        'נועה ישראלי (אחות מוסמכת)',
+        'דנה מזרחי (אחות מוסמכת)',
+        'יעל ביטון (אחות אחראית)'
+      ],
+      activeUserName: '',
+      isManager: false,
+      managerPin: '1234',
+      activeTab: 'inventory',
+      selectedCategory: 'all',
+      filterTraffic: 'all',
+      logFilter: 'all',
+      // Scanner temporary state
+      currentScannedImage: '',
+      currentScannedEqId: null
+    };
+
+    // ==================== DATE HELPERS ====================
+    function formatDateISO(dateObj) {
+      if (!dateObj || isNaN(dateObj.getTime())) return '';
+      const y = dateObj.getFullYear();
+      const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const d = String(dateObj.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+
+    function addDaysISO(isoStr, days) {
+      if (!isoStr) return '';
+      const dt = new Date(isoStr + 'T00:00:00');
+      if (isNaN(dt.getTime())) return '';
+      dt.setDate(dt.getDate() + days);
+      return formatDateISO(dt);
+    }
+
+    function daysFromToday(isoStr) {
+      if (!isoStr) return null;
+      const target = new Date(isoStr + 'T00:00:00');
+      if (isNaN(target.getTime())) return null;
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      return Math.round((target - today) / (1000 * 60 * 60 * 24));
+    }
+
+    function formatDisplayDate(isoStr) {
+      if (!isoStr) return 'לא תועד';
+      const parts = isoStr.split('-');
+      if (parts.length !== 3) return isoStr;
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+
+    function formatDateTime(ts) {
+      if (!ts) return '';
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return '';
+      return d.toLocaleString('he-IL', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+
+    function parseExcelDate(val) {
+      if (!val) return '';
+      if (val instanceof Date && !isNaN(val.getTime())) {
+        return formatDateISO(val);
+      }
+      if (typeof val === 'number') {
+        // Excel serial date
+        const utcDays = Math.floor(val - 25569);
+        const dateInfo = new Date(utcDays * 86400 * 1000);
+        return formatDateISO(dateInfo);
+      }
+      const s = String(val).trim();
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+      const m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
+      if (m) {
+        let yr = parseInt(m[3], 10);
+        if (yr < 100) yr += 2000;
+        return `${yr}-${String(m[2]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
+      }
+      return '';
+    }
+
+    // ==================== BUSINESS LOGIC HELPERS ====================
+    function getCategoryIdForType(eqType) {
+      const clean = (eqType || '').trim();
+      for (const cat of CATEGORIES) {
+        if (cat.types && cat.types.includes(clean)) return cat.id;
+      }
+      return 'lab_general';
+    }
+
+    function isClosedIncubator(eq) {
+      return FILTER_INCUBATOR_TYPES.includes((eq.equipmentType || '').trim());
+    }
+
+    // Traffic light status for 90-day filter cycle
+    function getFilterStatus(eq) {
+      if (!eq.lastFilterDate) {
+        return {
+          level: 'red',
+          label: 'לא תועדה החלפה',
+          daysRemaining: -999,
+          nextDate: ''
+        };
+      }
+      const nextDate = addDaysISO(eq.lastFilterDate, 90);
+      const remaining = daysFromToday(nextDate);
+      if (remaining <= 0) {
+        return {
+          level: 'red',
+          label: `חריגה של ${Math.abs(remaining)} ימים`,
+          daysRemaining: remaining,
+          nextDate
+        };
+      }
+      if (remaining <= 14) {
+        return {
+          level: 'orange',
+          label: `נותרו ${remaining} ימים להחלפה`,
+          daysRemaining: remaining,
+          nextDate
+        };
+      }
+      return {
+        level: 'green',
+        label: `תקין (נותרו ${remaining} ימים)`,
+        daysRemaining: remaining,
+        nextDate
+      };
+    }
+
+    // Biomedical engineering maintenance alert (within 30 days or overdue)
+    function getBioAlertStatus(eq) {
+      if (!eq.nextMaintDate) return { level: 'none', label: '' };
+      const diff = daysFromToday(eq.nextMaintDate);
+      if (diff === null) return { level: 'none', label: '' };
+      if (diff < 0) {
+        return { level: 'red', label: `חריגת מ.רפואי (${Math.abs(diff)} ימים)` };
+      }
+      if (diff <= 30) {
+        return { level: 'orange', label: `טיפול מ.רפואי בעוד ${diff} ימים` };
+      }
+      return { level: 'ok', label: '' };
+    }
+
+    function getStatusBadgeClass(status) {
+      switch (status) {
+        case 'תקין': return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+        case 'הנדסה רפואית': return 'bg-red-100 text-red-800 border-red-200';
+        case 'שליחה עם מטופל': return 'bg-purple-100 text-purple-800 border-purple-200';
+        case 'השאלה': return 'bg-amber-100 text-amber-800 border-amber-200';
+        case 'מושבת': return 'bg-slate-200 text-slate-700 border-slate-300';
+        default: return 'bg-sky-100 text-sky-800 border-sky-200';
+      }
+    }
+
+    // ==================== SEED SAMPLE DATA ====================
+    function buildSampleEquipment() {
+      const today = formatDateISO(new Date());
+      return [
+        {
+          id: 'eq-1001',
+          unit: 'פגייה',
+          inventoryNumber: '104521',
+          equipmentType: 'אינקובטור לתינוק',
+          description: 'אינקובטור משולב Giraffe OmniBed',
+          manufacturer: 'GE Healthcare',
+          model: 'Giraffe OmniBed',
+          serialNumber: 'HDG220194',
+          status: 'תקין',
+          room: 'חדר 1',
+          locationDesc: 'אשכול א - עמדה 1',
+          maintFreqDays: 365,
+          lastMaintDate: addDaysISO(today, -200),
+          nextMaintDate: addDaysISO(today, 165),
+          lastFilterDate: addDaysISO(today, -95), // Red (overdue)
+          lastFilterBy: 'שרה כהן (כוח עזר)',
+          statusNote: ''
+        },
+        {
+          id: 'eq-1002',
+          unit: 'פגייה',
+          inventoryNumber: '104522',
+          equipmentType: 'אינקובטור לתינוק',
+          description: 'אינקובטור סגור Babyleo TN500',
+          manufacturer: 'Dräger',
+          model: 'Babyleo TN500',
+          serialNumber: 'DRG88412',
+          status: 'תקין',
+          room: 'חדר 1',
+          locationDesc: 'אשכול א - עמדה 2',
+          maintFreqDays: 365,
+          lastMaintDate: addDaysISO(today, -345),
+          nextMaintDate: addDaysISO(today, 20), // Orange bio alert
+          lastFilterDate: addDaysISO(today, -82), // Orange (8 days left)
+          lastFilterBy: 'מרים לוי (כוח עזר)',
+          statusNote: ''
+        },
+        {
+          id: 'eq-1003',
+          unit: 'פגייה',
+          inventoryNumber: '104523',
+          equipmentType: 'אינקובטור',
+          description: 'אינקובטור סגור Caleo',
+          manufacturer: 'Dräger',
+          model: 'Caleo',
+          serialNumber: 'DRG55310',
+          status: 'תקין',
+          room: 'חדר 2',
+          locationDesc: 'אשכול ב - עמדה 4',
+          maintFreqDays: 365,
+          lastMaintDate: addDaysISO(today, -120),
+          nextMaintDate: addDaysISO(today, 245),
+          lastFilterDate: addDaysISO(today, -30), // Green (60 days left)
+          lastFilterBy: 'אילנה אברהם (כוח עזר)',
+          statusNote: ''
+        },
+        {
+          id: 'eq-1004',
+          unit: 'פגייה',
+          inventoryNumber: '104524',
+          equipmentType: 'אינקובטור לתינוק',
+          description: 'אינקובטור סגור Giraffe',
+          manufacturer: 'GE Healthcare',
+          model: 'Giraffe Carestation',
+          serialNumber: 'HDG220881',
+          status: 'תקין',
+          room: 'חדר 2',
+          locationDesc: 'אשכול ב - עמדה 5',
+          maintFreqDays: 365,
+          lastMaintDate: addDaysISO(today, -100),
+          nextMaintDate: addDaysISO(today, 265),
+          lastFilterDate: '', // Red (never replaced)
+          lastFilterBy: '',
+          statusNote: ''
+        },
+        {
+          id: 'eq-1005',
+          unit: 'פגייה',
+          inventoryNumber: '201105',
+          equipmentType: 'משאבות מזרק',
+          description: 'משאבת מזרק Perfusor Space',
+          manufacturer: 'B. Braun',
+          model: 'Perfusor Space',
+          serialNumber: 'BB991204',
+          status: 'תקין',
+          room: 'חדר 1',
+          locationDesc: 'עמוד עירוי 1',
+          maintFreqDays: 365,
+          lastMaintDate: addDaysISO(today, -380),
+          nextMaintDate: addDaysISO(today, -15), // Red bio alert
+          lastFilterDate: '',
+          statusNote: ''
+        },
+        {
+          id: 'eq-1006',
+          unit: 'פגייה',
+          inventoryNumber: '305882',
+          equipmentType: 'מכשיר הנשמה',
+          description: 'מנשם פגים Babylog VN500',
+          manufacturer: 'Dräger',
+          model: 'VN500',
+          serialNumber: 'VN500-991',
+          status: 'הנדסה רפואית',
+          room: 'הנדסה רפואית',
+          locationDesc: 'נשלח לתיקון - חיישן זרימה',
+          maintFreqDays: 180,
+          lastMaintDate: addDaysISO(today, -150),
+          nextMaintDate: addDaysISO(today, 30),
+          lastFilterDate: '',
+          statusNote: 'תקלה בחיישן זרימה אקספירטורי'
+        },
+        {
+          id: 'eq-1007',
+          unit: 'פגייה',
+          inventoryNumber: '408210',
+          equipmentType: 'מוניטור רב פרמטרים',
+          description: 'מוניטור חולה IntelliVue MX700',
+          manufacturer: 'Philips',
+          model: 'MX700',
+          serialNumber: 'PH-44210',
+          status: 'תקין',
+          room: 'חדר 1',
+          locationDesc: 'אשכול א - עמדה 1',
+          maintFreqDays: 365,
+          lastMaintDate: addDaysISO(today, -90),
+          nextMaintDate: addDaysISO(today, 275),
+          lastFilterDate: '',
+          statusNote: ''
+        },
+        {
+          id: 'eq-1008',
+          unit: 'פגייה',
+          inventoryNumber: '501412',
+          equipmentType: 'מכשיר הרדת בילירובין',
+          description: 'מנורת פוטותרפיה LED',
+          manufacturer: 'Natus',
+          model: 'neoBLUE',
+          serialNumber: 'NT-7782',
+          status: 'תקין',
+          room: 'חדר 3',
+          locationDesc: 'חדר ביניים',
+          maintFreqDays: 365,
+          lastMaintDate: addDaysISO(today, -60),
+          nextMaintDate: addDaysISO(today, 305),
+          lastFilterDate: '',
+          statusNote: ''
+        },
+        {
+          id: 'eq-1009',
+          unit: 'פגייה',
+          inventoryNumber: '609300',
+          equipmentType: 'אלקטרואנציפולוגרף',
+          description: 'מוניטור מוחי aEEG Olympic',
+          manufacturer: 'Natus',
+          model: 'Brainz',
+          serialNumber: 'BR-2219',
+          status: 'השאלה',
+          room: 'מחוץ למחלקה',
+          locationDesc: 'הושאל לב"ח שניידר',
+          maintFreqDays: 365,
+          lastMaintDate: addDaysISO(today, -180),
+          nextMaintDate: addDaysISO(today, 185),
+          lastFilterDate: '',
+          statusNote: 'השאלה למחלקת ילודים - ד"ר לוי'
+        },
+        {
+          id: 'eq-1010',
+          unit: 'פגייה',
+          inventoryNumber: '702115',
+          equipmentType: 'משאבות חלב',
+          description: 'משאבת חלב Symphony',
+          manufacturer: 'Medela',
+          model: 'Symphony',
+          serialNumber: 'MD-6612',
+          status: 'תקין',
+          room: 'חדר הנקה',
+          locationDesc: 'עמדת שאיבה 2',
+          maintFreqDays: 365,
+          lastMaintDate: addDaysISO(today, -100),
+          nextMaintDate: addDaysISO(today, 265),
+          lastFilterDate: '',
+          statusNote: ''
+        },
+        {
+          id: 'eq-1011',
+          unit: 'פגייה',
+          inventoryNumber: '804490',
+          equipmentType: 'מ.לגילוי ורידים',
+          description: 'מכשיר גילוי ורידים אינפרה אדום',
+          manufacturer: 'AccuVein',
+          model: 'AV500',
+          serialNumber: 'AV-5501',
+          status: 'תקין',
+          room: 'חדר טיפולים',
+          locationDesc: 'עגלת טיפולים',
+          maintFreqDays: 365,
+          lastMaintDate: addDaysISO(today, -50),
+          nextMaintDate: addDaysISO(today, 315),
+          lastFilterDate: '',
+          statusNote: ''
+        }
+      ];
+    }
+
+    // ==================== FIREBASE INITIALIZATION & SYNC ====================
+    async function initCloudSync() {
+      const badge = document.getElementById('syncBadge');
+      try {
+        if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+          const firebaseConfig = typeof __firebase_config === 'string'
+            ? JSON.parse(__firebase_config)
+            : __firebase_config;
+
+          const app = initializeApp(firebaseConfig);
+          db = getFirestore(app);
+          auth = getAuth(app);
+
+          // RULE 3: Authenticate FIRST before any Firestore operations
+          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            await signInWithCustomToken(auth, __initial_auth_token);
+          } else {
+            await signInAnonymously(auth);
+          }
+          currentUser = auth.currentUser;
+          useCloud = true;
+
+          badge.innerHTML = '<i class="fa-solid fa-cloud-check text-emerald-300"></i> מסונכרן בענן';
+          subscribeToFirestore();
+          return;
+        }
+      } catch (err) {
+        console.error('Firebase init error, falling back to local memory:', err);
+      }
+
+      // Fallback to in-memory mode if no Firebase config is present
+      useCloud = false;
+      badge.innerHTML = '<i class="fa-solid fa-database text-amber-300"></i> מצב מקומי';
+      state.equipment = buildSampleEquipment();
+      renderAll();
+    }
+
+    function getPublicCollection(colName) {
+      // RULE 1: Strict Path
+      return collection(db, 'artifacts', appId, 'public', 'data', colName);
+    }
+
+    function getPublicDoc(colName, docId) {
+      return doc(db, 'artifacts', appId, 'public', 'data', colName, docId);
+    }
+
+    function subscribeToFirestore() {
+      if (!currentUser || !db) return;
+
+      // 1. Equipment collection listener (RULE 2: Simple collection query, sort in JS)
+      onSnapshot(
+        getPublicCollection('equipment'),
+        async (snapshot) => {
+          if (snapshot.empty) {
+            // Seed sample data once so the app is immediately rich & testable
+            const samples = buildSampleEquipment();
+            const batch = writeBatch(db);
+            samples.forEach(item => {
+              batch.set(getPublicDoc('equipment', item.id), item);
+            });
+            await batch.commit();
+            return;
+          }
+          state.equipment = snapshot.docs.map(d => ({ ...d.data(), id: d.id }));
+          renderAll();
+        },
+        (error) => {
+          console.error('Equipment snapshot error:', error);
+          showToast('שגיאה בטעינת נתוני הציוד מהענן', 'error');
+        }
+      );
+
+      // 2. Logs collection listener
+      onSnapshot(
+        getPublicCollection('logs'),
+        (snapshot) => {
+          state.logs = snapshot.docs
+            .map(d => ({ ...d.data(), id: d.id }))
+            .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+          renderDashboard();
+        },
+        (error) => {
+          console.error('Logs snapshot error:', error);
+        }
+      );
+
+      // 3. Settings (staff list & manager PIN) listener
+      onSnapshot(
+        getPublicCollection('settings'),
+        (snapshot) => {
+          const staffDoc = snapshot.docs.find(d => d.id === 'staff');
+          if (staffDoc && Array.isArray(staffDoc.data().members)) {
+            state.staffList = staffDoc.data().members;
+            populateStaffDropdowns();
+          }
+          const secDoc = snapshot.docs.find(d => d.id === 'security');
+          if (secDoc && secDoc.data().managerPin) {
+            state.managerPin = String(secDoc.data().managerPin);
+          }
+        },
+        (error) => {
+          console.error('Settings snapshot error:', error);
+        }
+      );
+    }
+
+    // ==================== PERSISTENCE WRAPPERS ====================
+    async function saveEquipmentItem(item) {
+      if (useCloud && currentUser && db) {
+        await setDoc(getPublicDoc('equipment', item.id), item);
+      } else {
+        const idx = state.equipment.findIndex(e => e.id === item.id);
+        if (idx >= 0) state.equipment[idx] = item;
+        else state.equipment.unshift(item);
+        renderAll();
+      }
+    }
+
+    async function removeEquipmentItem(eqId) {
+      if (useCloud && currentUser && db) {
+        await deleteDoc(getPublicDoc('equipment', eqId));
+      } else {
+        state.equipment = state.equipment.filter(e => e.id !== eqId);
+        renderAll();
+      }
+    }
+
+    async function appendActivityLog(logEntry) {
+      const entry = {
+        ...logEntry,
+        timestamp: Date.now()
+      };
+      if (useCloud && currentUser && db) {
+        await addDoc(getPublicCollection('logs'), entry);
+      } else {
+        state.logs.unshift({ ...entry, id: 'log-' + Date.now() });
+        renderDashboard();
+      }
+    }
+
+    async function saveStaffListToCloud() {
+      if (useCloud && currentUser && db) {
+        await setDoc(getPublicDoc('settings', 'staff'), { members: state.staffList });
+      }
+      populateStaffDropdowns();
+    }
+
+    // ==================== UI RENDERING ====================
+    function renderAll() {
+      populateLocationFilter();
+      populateStaffDropdowns();
+      populateTypeDatalist();
+      renderCategoryButtons();
+      renderInventory();
+      renderIncubatorFilters();
+      renderDashboard();
+      updateAlertBadges();
+    }
+
+    function populateTypeDatalist() {
+      const dl = document.getElementById('equipmentTypesDatalist');
+      if (!dl) return;
+      const uniqueTypes = Array.from(new Set([...ALL_KNOWN_TYPES, ...state.equipment.map(e => e.equipmentType).filter(Boolean)]));
+      dl.innerHTML = uniqueTypes.map(t => `<option value="${escapeHtml(t)}"></option>`).join('');
+    }
+
+    function populateLocationFilter() {
+      const sel = document.getElementById('locationFilter');
+      if (!sel) return;
+      const currentVal = sel.value;
+      const rooms = Array.from(new Set(state.equipment.map(e => (e.room || '').trim()).filter(Boolean))).sort();
+      sel.innerHTML = '<option value="">כל החדרים/מיקומים</option>' +
+        rooms.map(r => `<option value="${escapeHtml(r)}" ${r === currentVal ? 'selected' : ''}>${escapeHtml(r)}</option>`).join('');
+    }
+
+    function populateStaffDropdowns() {
+      const optionsHtml = '<option value="">-- בחר/י מרשימת הצוות --</option>' +
+        state.staffList.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+      const userSel = document.getElementById('userSelectDropdown');
+      const filterSel = document.getElementById('filterStaffSelect');
+      if (userSel) userSel.innerHTML = optionsHtml;
+      if (filterSel) filterSel.innerHTML = optionsHtml;
+    }
+
+    function updateAlertBadges() {
+      const closedIncs = state.equipment.filter(isClosedIncubator);
+      const dueCount = closedIncs.filter(eq => {
+        const st = getFilterStatus(eq).level;
+        return st === 'red' || st === 'orange';
+      }).length;
+
+      ['filterAlertBadgeDesktop', 'filterAlertBadgeMobile'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (dueCount > 0) {
+          el.textContent = dueCount;
+          el.classList.remove('hidden');
+        } else {
+          el.classList.add('hidden');
+        }
+      });
+    }
+
+    // ---- TAB 1: Category Buttons & Inventory ----
+    function renderCategoryButtons() {
+      const grid = document.getElementById('categoryButtonsGrid');
+      if (!grid) return;
+
+      const counts = { all: state.equipment.length };
+      CATEGORIES.forEach(c => { if (c.id !== 'all') counts[c.id] = 0; });
+      state.equipment.forEach(eq => {
+        const cid = getCategoryIdForType(eq.equipmentType);
+        counts[cid] = (counts[cid] || 0) + 1;
+      });
+
+      grid.innerHTML = CATEGORIES.map(cat => {
+        const active = state.selectedCategory === cat.id;
+        const count = counts[cat.id] || 0;
+        return `
+          <button onclick="selectCategory('${cat.id}')" class="flex flex-col justify-between text-right p-3 rounded-xl border-2 transition active:scale-[0.98] ${
+            active
+              ? 'bg-medical-dark text-white border-burgundy shadow-md'
+              : 'bg-slate-50 hover:bg-medical-light/60 text-slate-800 border-slate-200 hover:border-medical-teal/50'
+          }">
+            <div class="flex items-center justify-between w-full mb-1.5">
+              <i class="fa-solid ${cat.icon} text-base sm:text-lg ${active ? 'text-teal-300' : 'text-medical-primary'}"></i>
+              <span class="px-2 py-0.5 rounded-full text-xs font-extrabold ${
+                active ? 'bg-burgundy text-white' : 'bg-white text-medical-dark border border-slate-200'
+              }">${count}</span>
+            </div>
+            <span class="text-xs sm:text-[13px] font-bold leading-snug line-clamp-2">${escapeHtml(cat.name)}</span>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function renderInventory() {
+      const grid = document.getElementById('inventoryGrid');
+      const countLabel = document.getElementById('inventoryCountLabel');
+      if (!grid) return;
+
+      const q = (document.getElementById('searchInput')?.value || '').trim().toLowerCase();
+      const statusVal = document.getElementById('statusFilter')?.value || '';
+      const locVal = document.getElementById('locationFilter')?.value || '';
+      const bioVal = document.getElementById('bioAlertFilter')?.value || '';
+
+      const filtered = state.equipment.filter(eq => {
+        if (state.selectedCategory !== 'all' && getCategoryIdForType(eq.equipmentType) !== state.selectedCategory) {
+          return false;
+        }
+        if (statusVal && eq.status !== statusVal) return false;
+        if (locVal && (eq.room || '').trim() !== locVal) return false;
+        if (bioVal) {
+          const bio = getBioAlertStatus(eq).level;
+          if (bioVal === 'alert' && bio !== 'red' && bio !== 'orange') return false;
+          if (bioVal === 'overdue' && bio !== 'red') return false;
+          if (bioVal === 'soon' && bio !== 'orange') return false;
+        }
+        if (q) {
+          const hay = [
+            eq.inventoryNumber, eq.equipmentType, eq.description,
+            eq.manufacturer, eq.model, eq.serialNumber, eq.room, eq.locationDesc
+          ].join(' ').toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+
+      countLabel.textContent = `מציג ${filtered.length} מתוך ${state.equipment.length} פריטים`;
+
+      if (filtered.length === 0) {
+        grid.innerHTML = `
+          <div class="col-span-full bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-500">
+            <i class="fa-solid fa-box-open text-4xl text-slate-300 mb-3"></i>
+            <p class="font-bold text-slate-700">לא נמצאו מכשירים התואמים לסינון</p>
+            <p class="text-xs mt-1">נסה/י לשנות את מילות החיפוש או לאפס את המסננים.</p>
+          </div>
+        `;
+        return;
+      }
+
+      grid.innerHTML = filtered.map(eq => {
+        const bio = getBioAlertStatus(eq);
+        const isInc = isClosedIncubator(eq);
+        const fStatus = isInc ? getFilterStatus(eq) : null;
+
+        return `
+          <div class="bg-white rounded-2xl shadow-sm border ${
+            bio.level === 'red' ? 'border-red-300' : bio.level === 'orange' ? 'border-amber-300' : 'border-slate-200'
+          } p-4 flex flex-col justify-between gap-3 hover:shadow-md transition">
+            <div class="space-y-2">
+              <!-- Header row -->
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="font-mono font-extrabold text-sm bg-medical-light text-medical-dark px-2.5 py-0.5 rounded-lg border border-medical-teal/20">
+                      #${escapeHtml(eq.inventoryNumber)}
+                    </span>
+                    <span class="text-xs font-bold px-2.5 py-0.5 rounded-full border ${getStatusBadgeClass(eq.status)}">
+                      ${escapeHtml(eq.status || 'תקין')}
+                    </span>
+                  </div>
+                  <h3 class="font-extrabold text-slate-800 text-sm sm:text-base mt-1.5 leading-snug">
+                    ${escapeHtml(eq.equipmentType)}
+                  </h3>
+                  ${eq.description ? `<p class="text-xs text-slate-500">${escapeHtml(eq.description)}</p>` : ''}
+                </div>
+
+                ${state.isManager ? `
+                  <button onclick="openAddEditModal('${eq.id}')" class="text-slate-400 hover:text-burgundy p-1.5 rounded-lg hover:bg-burgundy-light transition" title="עריכת נתוני יסוד (מנהל)">
+                    <i class="fa-solid fa-pen-to-square"></i>
+                  </button>
+                ` : ''}
+              </div>
+
+              <!-- Metadata Grid -->
+              <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-slate-600 bg-slate-50 rounded-xl p-2.5 border border-slate-100">
+                <div><span class="text-slate-400">יצרן/דגם:</span> <strong class="text-slate-700">${escapeHtml(eq.manufacturer || '-')} ${escapeHtml(eq.model || '')}</strong></div>
+                <div><span class="text-slate-400">סידורי:</span> <span class="font-mono">${escapeHtml(eq.serialNumber || '-')}</span></div>
+                <div class="col-span-2"><span class="text-slate-400"><i class="fa-solid fa-location-dot text-medical-teal ml-1"></i>מיקום:</span> <strong class="text-slate-800">${escapeHtml(eq.room || 'לא צוין')}${eq.locationDesc ? ' – ' + escapeHtml(eq.locationDesc) : ''}</strong></div>
+                ${eq.statusNote ? `<div class="col-span-2 text-burgundy font-medium pt-0.5"><i class="fa-solid fa-circle-info ml-1"></i>${escapeHtml(eq.statusNote)}</div>` : ''}
+              </div>
+
+              <!-- Alerts (Biomedical Maintenance + Incubator Filter) -->
+              <div class="flex flex-wrap gap-1.5">
+                ${bio.level === 'red' ? `
+                  <span class="inline-flex items-center gap-1 text-[11px] font-bold bg-red-100 text-red-800 px-2.5 py-1 rounded-lg">
+                    <i class="fa-solid fa-triangle-exclamation"></i> ${bio.label} (${formatDisplayDate(eq.nextMaintDate)})
+                  </span>
+                ` : bio.level === 'orange' ? `
+                  <span class="inline-flex items-center gap-1 text-[11px] font-bold bg-amber-100 text-amber-900 px-2.5 py-1 rounded-lg">
+                    <i class="fa-solid fa-clock"></i> ${bio.label} (${formatDisplayDate(eq.nextMaintDate)})
+                  </span>
+                ` : eq.nextMaintDate ? `
+                  <span class="inline-flex items-center gap-1 text-[11px] text-slate-500 bg-slate-100 px-2 py-0.5 rounded-lg">
+                    <i class="fa-solid fa-wrench"></i> מ.רפואי הבא: ${formatDisplayDate(eq.nextMaintDate)}
+                  </span>
+                ` : ''}
+
+                ${fStatus ? `
+                  <span class="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg ${
+                    fStatus.level === 'red' ? 'bg-red-600 text-white' :
+                    fStatus.level === 'orange' ? 'bg-amber-500 text-white' :
+                    'bg-emerald-100 text-emerald-800'
+                  }">
+                    <i class="fa-solid fa-wind"></i> פילטר: ${fStatus.label}
+                  </span>
+                ` : ''}
+              </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex items-center gap-2 pt-2 border-t border-slate-100">
+              <button onclick="openStatusModal('${eq.id}')" class="flex-1 bg-medical-dark hover:bg-medical-primary text-white text-xs sm:text-sm font-bold py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5">
+                <i class="fa-solid fa-arrows-rotate"></i>
+                עדכון סטטוס / מיקום
+              </button>
+              ${isInc ? `
+                <button onclick="openFilterScannerModal('${eq.id}')" class="bg-burgundy-light hover:bg-burgundy hover:text-white text-burgundy border border-burgundy-border text-xs font-bold py-2.5 px-3 rounded-xl transition flex items-center gap-1.5" title="בדיקת/החלפת פילטר">
+                  <i class="fa-solid fa-wind"></i>
+                  פילטר
+                </button>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // ---- TAB 2: Incubator Filters ----
+    function renderIncubatorFilters() {
+      const grid = document.getElementById('incubatorsGrid');
+      if (!grid) return;
+
+      const closedIncs = state.equipment.filter(isClosedIncubator);
+      let cRed = 0, cOrange = 0, cGreen = 0;
+
+      const enriched = closedIncs.map(eq => {
+        const fs = getFilterStatus(eq);
+        if (fs.level === 'red') cRed++;
+        else if (fs.level === 'orange') cOrange++;
+        else cGreen++;
+        return { eq, fs };
+      });
+
+      // Sort: Red first, then Orange, then Green
+      const order = { red: 0, orange: 1, green: 2 };
+      enriched.sort((a, b) => order[a.fs.level] - order[b.fs.level] || a.fs.daysRemaining - b.fs.daysRemaining);
+
+      document.getElementById('countFilterAll').textContent = closedIncs.length;
+      document.getElementById('countFilterRed').textContent = cRed;
+      document.getElementById('countFilterOrange').textContent = cOrange;
+      document.getElementById('countFilterGreen').textContent = cGreen;
+
+      const q = (document.getElementById('incubatorSearchInput')?.value || '').trim().toLowerCase();
+      const visible = enriched.filter(({ eq, fs }) => {
+        if (state.filterTraffic !== 'all' && fs.level !== state.filterTraffic) return false;
+        if (q) {
+          const hay = [eq.inventoryNumber, eq.room, eq.locationDesc, eq.model, eq.description].join(' ').toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+
+      if (visible.length === 0) {
+        grid.innerHTML = `
+          <div class="col-span-full bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-500">
+            <i class="fa-solid fa-wind text-4xl text-slate-300 mb-3"></i>
+            <p class="font-bold text-slate-700">אין אינקובטורים להצגה בסינון זה</p>
+          </div>
+        `;
+        return;
+      }
+
+      grid.innerHTML = visible.map(({ eq, fs }) => {
+        const borderClass = fs.level === 'red' ? 'border-red-500 bg-red-50/30' :
+                            fs.level === 'orange' ? 'border-amber-400 bg-amber-50/30' :
+                            'border-emerald-400 bg-white';
+        const pillClass = fs.level === 'red' ? 'bg-red-600 text-white' :
+                          fs.level === 'orange' ? 'bg-amber-500 text-white' :
+                          'bg-emerald-600 text-white';
+
+        return `
+          <div class="rounded-2xl border-2 ${borderClass} shadow-sm p-4 flex flex-col justify-between gap-3">
+            <div class="space-y-2.5">
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <span class="font-mono font-extrabold text-base text-medical-dark bg-white px-2.5 py-0.5 rounded-lg border border-slate-200 shadow-xs">
+                    #${escapeHtml(eq.inventoryNumber)}
+                  </span>
+                  <h3 class="font-extrabold text-slate-800 text-sm mt-1.5">${escapeHtml(eq.equipmentType)} ${eq.model ? '– ' + escapeHtml(eq.model) : ''}</h3>
+                  <p class="text-xs text-slate-500"><i class="fa-solid fa-location-dot text-medical-teal ml-1"></i>${escapeHtml(eq.room || 'לא צוין')} ${eq.locationDesc ? '· ' + escapeHtml(eq.locationDesc) : ''}</p>
+                </div>
+                <span class="px-2.5 py-1 rounded-full text-xs font-extrabold shrink-0 shadow-xs ${pillClass}">
+                  ${fs.level === 'red' ? 'דחוף' : fs.level === 'orange' ? 'בקרוב' : 'תקין'}
+                </span>
+              </div>
+
+              <div class="bg-white rounded-xl p-3 border border-slate-200/80 text-xs space-y-1.5">
+                <div class="flex justify-between">
+                  <span class="text-slate-500">החלפה אחרונה:</span>
+                  <strong class="text-slate-800">${formatDisplayDate(eq.lastFilterDate)}</strong>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-slate-500">מועד החלפה הבא (90 יום):</span>
+                  <strong class="${fs.level === 'red' ? 'text-red-700' : fs.level === 'orange' ? 'text-amber-700' : 'text-emerald-700'}">
+                    ${fs.nextDate ? formatDisplayDate(fs.nextDate) : 'נדרש מיידית'}
+                  </strong>
+                </div>
+                <div class="flex justify-between">
+                  <span class="text-slate-500">סטטוס:</span>
+                  <strong class="${fs.level === 'red' ? 'text-red-700' : fs.level === 'orange' ? 'text-amber-700' : 'text-emerald-700'}">${fs.label}</strong>
+                </div>
+                ${eq.lastFilterBy ? `
+                  <div class="flex justify-between pt-1 border-t border-slate-100">
+                    <span class="text-slate-500">בוצע ע"י:</span>
+                    <span class="font-semibold text-slate-700">${escapeHtml(eq.lastFilterBy)}</span>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+
+            <button onclick="openFilterScannerModal('${eq.id}')" class="w-full py-2.5 rounded-xl font-extrabold text-sm transition flex items-center justify-center gap-2 shadow-sm ${
+              fs.level === 'red' ? 'bg-red-600 hover:bg-red-700 text-white' :
+              fs.level === 'orange' ? 'bg-amber-500 hover:bg-amber-600 text-white' :
+              'bg-medical-dark hover:bg-medical-primary text-white'
+            }">
+              <i class="fa-solid fa-camera"></i>
+              ${fs.level === 'green' ? 'בדיקה / צילום מדבקה' : 'צילום מדבקה ותיעוד החלפה'}
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // ---- TAB 3: Dashboard & Logs ----
+    function renderDashboard() {
+      const total = state.equipment.length;
+      const outCount = state.equipment.filter(e => ['הנדסה רפואית', 'שליחה עם מטופל', 'השאלה', 'מושבת'].includes(e.status)).length;
+      const closedIncs = state.equipment.filter(isClosedIncubator);
+      const incGreen = closedIncs.filter(e => getFilterStatus(e).level === 'green').length;
+      const incDue = closedIncs.length - incGreen;
+      const bioAlerts = state.equipment.filter(e => {
+        const l = getBioAlertStatus(e).level;
+        return l === 'red' || l === 'orange';
+      }).length;
+
+      document.getElementById('kpiTotal').textContent = total;
+      document.getElementById('kpiOut').textContent = outCount;
+      document.getElementById('kpiIncGreen').textContent = incGreen;
+      document.getElementById('kpiIncDue').textContent = incDue;
+      document.getElementById('kpiBioAlerts').textContent = bioAlerts;
+
+      const tbody = document.getElementById('logsTableBody');
+      if (!tbody) return;
+
+      const q = (document.getElementById('logSearchInput')?.value || '').trim().toLowerCase();
+      const filteredLogs = state.logs.filter(log => {
+        if (state.logFilter === 'filter' && log.category !== 'filter') return false;
+        if (state.logFilter === 'status' && log.category !== 'status') return false;
+        if (q) {
+          const hay = [log.inventoryNumber, log.actionType, log.details, log.performedBy].join(' ').toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+
+      if (filteredLogs.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="6" class="py-8 text-center text-slate-400">
+              <i class="fa-solid fa-clipboard-list text-3xl mb-2 block"></i>
+              עדיין אין רשומות פעילות להצגה.
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = filteredLogs.map(log => `
+        <tr class="hover:bg-slate-50 transition">
+          <td class="py-3 px-3 whitespace-nowrap text-slate-500 text-xs">${formatDateTime(log.timestamp)}</td>
+          <td class="py-3 px-3 whitespace-nowrap font-mono font-bold text-medical-dark">#${escapeHtml(log.inventoryNumber || '-')}</td>
+          <td class="py-3 px-3 whitespace-nowrap">
+            <span class="px-2.5 py-0.5 rounded-full text-xs font-bold ${
+              log.category === 'filter' ? 'bg-teal-100 text-teal-800' :
+              log.category === 'admin' ? 'bg-burgundy-light text-burgundy' :
+              'bg-sky-100 text-sky-800'
+            }">${escapeHtml(log.actionType)}</span>
+          </td>
+          <td class="py-3 px-3 text-slate-700 max-w-xs">${escapeHtml(log.details || '')}</td>
+          <td class="py-3 px-3 whitespace-nowrap font-semibold text-slate-800">${escapeHtml(log.performedBy || 'לא צוין')}</td>
+          <td class="py-3 px-3 text-center">
+            ${log.photoDataUrl ? `
+              <button onclick="openLightbox('${log.id}')" class="inline-flex items-center gap-1 bg-slate-100 hover:bg-medical-light text-medical-dark px-2.5 py-1 rounded-lg text-xs font-bold border border-slate-200 transition">
+                <i class="fa-solid fa-image text-medical-teal"></i> צפה
+              </button>
+            ` : '<span class="text-slate-300 text-xs">—</span>'}
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    // ==================== NAVIGATION & INTERACTION HANDLERS ====================
+    window.switchTab = function(tabName) {
+      state.activeTab = tabName;
+      ['inventory', 'filters', 'dashboard'].forEach(t => {
+        document.getElementById('section-' + t).classList.toggle('hidden', t !== tabName);
+        const deskBtn = document.getElementById('tabBtn-' + t);
+        if (deskBtn) {
+          deskBtn.className = `nav-tab-desktop flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition relative ${
+            t === tabName ? 'bg-white text-medical-dark shadow' : 'text-sky-100 hover:bg-white/10'
+          }`;
+        }
+        const mobBtn = document.getElementById('mobTabBtn-' + t);
+        if (mobBtn) {
+          mobBtn.className = `nav-tab-mobile flex flex-col items-center justify-center py-2.5 text-xs font-bold border-t-2 relative ${
+            t === tabName ? 'text-burgundy border-burgundy bg-burgundy-light/40' : 'text-slate-500 border-transparent'
+          }`;
+        }
+      });
+    };
+
+    window.selectCategory = function(catId) {
+      state.selectedCategory = catId;
+      renderCategoryButtons();
+      renderInventory();
+    };
+
+    window.resetInventoryFilters = function() {
+      state.selectedCategory = 'all';
+      document.getElementById('searchInput').value = '';
+      document.getElementById('statusFilter').value = '';
+      document.getElementById('locationFilter').value = '';
+      document.getElementById('bioAlertFilter').value = '';
+      renderCategoryButtons();
+      renderInventory();
+    };
+
+    window.setFilterTraffic = function(level) {
+      state.filterTraffic = level;
+      ['all', 'red', 'orange', 'green'].forEach(k => {
+        const el = document.getElementById('trafficBtn-' + k);
+        if (!el) return;
+        el.classList.toggle('ring-2', k === level);
+        el.classList.toggle('ring-medical-dark', k === level);
+      });
+      renderIncubatorFilters();
+    };
+
+    window.setLogFilter = function(filterType) {
+      state.logFilter = filterType;
+      ['all', 'filter', 'status'].forEach(k => {
+        const btn = document.getElementById('logFilterBtn-' + k);
+        if (!btn) return;
+        btn.className = k === filterType
+          ? 'log-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold bg-medical-dark text-white transition'
+          : 'log-filter-btn px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 transition';
+      });
+      renderDashboard();
+    };
+
+    // ==================== USER & MANAGER AUTH ====================
+    window.openUserModal = function() {
+      document.getElementById('userFreeText').value = state.activeUserName || '';
+      document.getElementById('userModal').classList.remove('hidden');
+    };
+
+    window.saveActiveUser = function() {
+      const name = document.getElementById('userFreeText').value.trim();
+      if (!name) {
+        showToast('יש לבחור או להזין שם מלא', 'error');
+        return;
+      }
+      state.activeUserName = name;
+      document.getElementById('headerUserName').textContent = name;
+      closeModal('userModal');
+      showToast(`שלום, ${name}`, 'success');
+    };
+
+    window.handleManagerToggle = function() {
+      if (state.isManager) {
+        state.isManager = false;
+        updateManagerUI();
+        showToast('יצאת ממצב מנהל', 'info');
+      } else {
+        document.getElementById('managerPinInput').value = '';
+        document.getElementById('managerPinError').classList.add('hidden');
+        document.getElementById('managerLoginModal').classList.remove('hidden');
+        setTimeout(() => document.getElementById('managerPinInput').focus(), 100);
+      }
+    };
+
+    window.verifyManagerPin = function() {
+      const val = document.getElementById('managerPinInput').value.trim();
+      if (val === state.managerPin) {
+        state.isManager = true;
+        closeModal('managerLoginModal');
+        updateManagerUI();
+        showToast('מצב מנהל הופעל בהצלחה', 'success');
+      } else {
+        document.getElementById('managerPinError').classList.remove('hidden');
+      }
+    };
+
+    function updateManagerUI() {
+      document.getElementById('managerLockIcon').className = state.isManager ? 'fa-solid fa-lock-open text-emerald-300' : 'fa-solid fa-lock';
+      document.getElementById('managerBtnText').textContent = state.isManager ? 'מנהל (פעיל)' : 'מנהל';
+      document.getElementById('managerQuickBar').classList.toggle('hidden', !state.isManager);
+      document.getElementById('mobileManagerBar').classList.toggle('hidden', !state.isManager);
+      renderInventory();
+    }
+
+    window.openChangePinModal = function() {
+      if (!state.isManager) {
+        showToast('פעולה זו זמינה למנהלים בלבד', 'error');
+        return;
+      }
+      document.getElementById('currentPinInput').value = '';
+      document.getElementById('newPinInput').value = '';
+      document.getElementById('confirmPinInput').value = '';
+      document.getElementById('changePinError').classList.add('hidden');
+      document.getElementById('changePinModal').classList.remove('hidden');
+      setTimeout(() => document.getElementById('currentPinInput').focus(), 100);
+    };
+
+    window.saveNewManagerPin = async function() {
+      const currentPin = document.getElementById('currentPinInput').value.trim();
+      const newPin = document.getElementById('newPinInput').value.trim();
+      const confirmPin = document.getElementById('confirmPinInput').value.trim();
+      const errEl = document.getElementById('changePinError');
+
+      if (currentPin !== state.managerPin) {
+        errEl.textContent = 'קוד המנהל הנוכחי שגוי.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      if (newPin.length < 4) {
+        errEl.textContent = 'הקוד החדש חייב להכיל לפחות 4 תווים.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      if (newPin !== confirmPin) {
+        errEl.textContent = 'הקוד החדש ואימות הקוד אינם תואמים.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      state.managerPin = newPin;
+      try {
+        if (useCloud && currentUser && db) {
+          await setDoc(getPublicDoc('settings', 'security'), {
+            managerPin: newPin,
+            updatedAt: Date.now(),
+            updatedBy: state.activeUserName || 'מנהל מחלקה'
+          });
+        }
+        await appendActivityLog({
+          category: 'admin',
+          inventoryNumber: 'ADMIN',
+          equipmentType: 'אבטחה',
+          actionType: 'שינוי קוד מנהל',
+          details: 'קוד הגישה למצב מנהל עודכן בהצלחה',
+          performedBy: state.activeUserName || 'מנהל מחלקה'
+        });
+        closeModal('changePinModal');
+        showToast('קוד המנהל שונה ונשמר בהצלחה!', 'success');
+      } catch (err) {
+        console.error('Error saving new PIN:', err);
+        errEl.textContent = 'אירעה שגיאה בשמירת הקוד החדש.';
+        errEl.classList.remove('hidden');
+      }
+    };
+
+    // ==================== STATUS & LOCATION UPDATE MODAL ====================
+    window.openStatusModal = function(eqId) {
+      const eq = state.equipment.find(e => e.id === eqId);
+      if (!eq) return;
+
+      document.getElementById('statusEqId').value = eq.id;
+      document.getElementById('statusModalSubtitle').textContent =
+        `#${eq.inventoryNumber} · ${eq.equipmentType} (${eq.room || 'ללא חדר'})`;
+      document.getElementById('statusActionSelect').value =
+        ['תקין', 'הנדסה רפואית', 'שליחה עם מטופל', 'השאלה', 'מושבת'].includes(eq.status)
+          ? eq.status
+          : 'תקין';
+
+      document.getElementById('statusNewLocation').value = eq.room || '';
+      document.getElementById('statusFaultDesc').value = '';
+      document.getElementById('statusHospitalName').value = '';
+      document.getElementById('statusHospitalExtra').value = '';
+      document.getElementById('statusDecommissionReason').value = '';
+      document.getElementById('statusPerformerName').value = state.activeUserName || '';
+      document.getElementById('statusModalError').classList.add('hidden');
+
+      onStatusActionChange();
+      document.getElementById('statusModal').classList.remove('hidden');
+    };
+
+    window.onStatusActionChange = function() {
+      const action = document.getElementById('statusActionSelect').value;
+      const locWrap = document.getElementById('fieldLocationWrap');
+      const faultWrap = document.getElementById('fieldFaultWrap');
+      const hospWrap = document.getElementById('fieldHospitalWrap');
+      const decommWrap = document.getElementById('fieldDecommissionWrap');
+
+      locWrap.classList.toggle('hidden', !(action === 'תקין' || action === 'החזרה'));
+      faultWrap.classList.toggle('hidden', action !== 'הנדסה רפואית');
+      hospWrap.classList.toggle('hidden', !(action === 'שליחה עם מטופל' || action === 'השאלה'));
+      decommWrap.classList.toggle('hidden', action !== 'מושבת');
+
+      if (action === 'שליחה עם מטופל') {
+        document.getElementById('hospitalFieldLabel').textContent = 'בית החולים המקבל:';
+        document.getElementById('hospitalExtraLabel').textContent = 'תאריך שליחה והערה:';
+      } else if (action === 'השאלה') {
+        document.getElementById('hospitalFieldLabel').textContent = 'בית החולים השואל:';
+        document.getElementById('hospitalExtraLabel').textContent = 'איש קשר והערה:';
+      }
+    };
+
+    window.submitStatusUpdate = async function() {
+      const eqId = document.getElementById('statusEqId').value;
+      const eq = state.equipment.find(e => e.id === eqId);
+      if (!eq) return;
+
+      const action = document.getElementById('statusActionSelect').value;
+      const performer = document.getElementById('statusPerformerName').value.trim();
+      const errEl = document.getElementById('statusModalError');
+
+      if (!performer) {
+        errEl.textContent = 'חובה להזין את שם מבצע/ת העדכון.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      let newStatus = action === 'החזרה' ? 'תקין' : action;
+      let newRoom = eq.room;
+      let newLocDesc = eq.locationDesc;
+      let note = '';
+      let logDetails = '';
+
+      if (action === 'תקין' || action === 'החזרה') {
+        newRoom = document.getElementById('statusNewLocation').value.trim() || eq.room || 'פגייה';
+        newLocDesc = action === 'החזרה' ? 'הוחזר למחלקה (תקין)' : (eq.locationDesc || '');
+        note = '';
+        logDetails = action === 'החזרה'
+          ? `הוחזר למחלקה לסטטוס תקין · מיקום: ${newRoom}`
+          : `עודכן מיקום/סטטוס תקין · מיקום: ${newRoom}`;
+      } else if (action === 'הנדסה רפואית') {
+        const fault = document.getElementById('statusFaultDesc').value.trim();
+        if (!fault) {
+          errEl.textContent = 'יש להזין תיאור תקלה לפני העברה להנדסה רפואית.';
+          errEl.classList.remove('hidden');
+          return;
+        }
+        newRoom = 'הנדסה רפואית';
+        newLocDesc = 'בתיקון';
+        note = `תקלה: ${fault}`;
+        logDetails = `דווחה תקלה והועבר להנדסה רפואית: ${fault}`;
+      } else if (action === 'שליחה עם מטופל' || action === 'השאלה') {
+        const hosp = document.getElementById('statusHospitalName').value.trim();
+        const extra = document.getElementById('statusHospitalExtra').value.trim();
+        if (!hosp) {
+          errEl.textContent = 'יש לציין את שם בית החולים.';
+          errEl.classList.remove('hidden');
+          return;
+        }
+        newRoom = 'מחוץ למחלקה';
+        newLocDesc = `${action}: ${hosp}`;
+        note = `${action} לב"ח ${hosp}${extra ? ' (' + extra + ')' : ''}`;
+        logDetails = note;
+      } else if (action === 'מושבת') {
+        const reason = document.getElementById('statusDecommissionReason').value.trim() || 'לא צוינה סיבה';
+        note = `מושבת: ${reason}`;
+        logDetails = `המכשיר הושבת · סיבה: ${reason}`;
+      }
+
+      // Update active user automatically if empty
+      if (!state.activeUserName) {
+        state.activeUserName = performer;
+        document.getElementById('headerUserName').textContent = performer;
+      }
+
+      const updatedEq = {
+        ...eq,
+        status: newStatus,
+        room: newRoom,
+        locationDesc: newLocDesc,
+        statusNote: note
+      };
+
+      await saveEquipmentItem(updatedEq);
+      await appendActivityLog({
+        category: 'status',
+        inventoryNumber: eq.inventoryNumber,
+        equipmentType: eq.equipmentType,
+        actionType: action === 'החזרה' ? 'החזרה למחלקה' : `סטטוס: ${newStatus}`,
+        details: logDetails,
+        performedBy: performer
+      });
+
+      closeModal('statusModal');
+      showToast('סטטוס ומיקום המכשיר עודכנו בהצלחה', 'success');
+    };
+
+    // ==================== INCUBATOR STICKER SCAN, OCR & FILTER REPLACEMENT ====================
+    window.openFilterScannerModal = function(preselectedEqId) {
+      state.currentScannedImage = '';
+      state.currentScannedEqId = null;
+
+      // Reset UI
+      document.getElementById('stickerFileInput').value = '';
+      document.getElementById('stickerPreviewImg').classList.add('hidden');
+      document.getElementById('ocrSpinner').classList.add('hidden');
+      document.getElementById('stickerBtnLabel').textContent = 'צלם / העלה תמונת מדבקה';
+      document.getElementById('ocrStatusMsg').textContent = 'התמונה תישמר כהוכחה בתיעוד ההחלפה';
+      document.getElementById('scanInvInput').value = '';
+      document.getElementById('scanResultBox').classList.add('hidden');
+      document.getElementById('filterConfirmForm').classList.add('hidden');
+      document.getElementById('filterFormError').classList.add('hidden');
+      document.getElementById('filterStaffInput').value = state.activeUserName || '';
+
+      // Populate incubator dropdown (closed incubators only)
+      const closedIncs = state.equipment.filter(isClosedIncubator);
+      const sel = document.getElementById('scanIncubatorSelect');
+      sel.innerHTML = '<option value="">-- או בחר/י אינקובטור מהרשימה --</option>' +
+        closedIncs.map(eq => `<option value="${eq.id}">#${escapeHtml(eq.inventoryNumber)} (${escapeHtml(eq.room || 'ללא חדר')})</option>`).join('');
+
+      if (preselectedEqId) {
+        sel.value = preselectedEqId;
+        onSelectIncubatorDropdown(preselectedEqId);
+      }
+
+      document.getElementById('filterScanModal').classList.remove('hidden');
+    };
+
+    // Compress uploaded photo via canvas so it safely fits in Firestore document
+    function compressImageFile(file, maxWidth = 520, quality = 0.6) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            const scale = Math.min(1, maxWidth / img.width);
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(img.width * scale);
+            canvas.height = Math.round(img.height * scale);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+          };
+          img.onerror = reject;
+          img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    window.handleStickerImageUpload = async function(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const preview = document.getElementById('stickerPreviewImg');
+      const spinner = document.getElementById('ocrSpinner');
+      const statusMsg = document.getElementById('ocrStatusMsg');
+
+      try {
+        const compressedDataUrl = await compressImageFile(file);
+        state.currentScannedImage = compressedDataUrl;
+        preview.src = compressedDataUrl;
+        preview.classList.remove('hidden');
+        document.getElementById('stickerBtnLabel').textContent = 'החלף תמונת מדבקה';
+
+        // Run Tesseract.js OCR to detect printed inventory number
+        if (typeof Tesseract !== 'undefined') {
+          spinner.classList.remove('hidden');
+          spinner.classList.add('flex');
+          statusMsg.textContent = 'מבצע זיהוי אופטי של מספר האינוונטר...';
+
+          const result = await Tesseract.recognize(compressedDataUrl, 'eng');
+          const rawText = (result.data.text || '').replace(/\s+/g, ' ');
+          const digitGroups = rawText.match(/\d{4,10}/g) || [];
+
+          spinner.classList.add('hidden');
+          spinner.classList.remove('flex');
+
+          // Try to match any detected number to our closed incubators
+          const closedIncs = state.equipment.filter(isClosedIncubator);
+          let matched = null;
+          for (const digits of digitGroups) {
+            matched = closedIncs.find(eq => String(eq.inventoryNumber).includes(digits) || digits.includes(String(eq.inventoryNumber)));
+            if (matched) break;
+          }
+
+          if (matched) {
+            statusMsg.textContent = `זוהה בהצלחה מהמדבקה: #${matched.inventoryNumber}`;
+            document.getElementById('scanInvInput').value = matched.inventoryNumber;
+            document.getElementById('scanIncubatorSelect').value = matched.id;
+            displayIncubatorScanResult(matched);
+          } else if (digitGroups.length > 0) {
+            statusMsg.textContent = `נקרא מספר (${digitGroups[0]}) – אנא ודאי או בחרי מהרשימה.`;
+            document.getElementById('scanInvInput').value = digitGroups[0];
+            matchIncubatorByNumber(digitGroups[0]);
+          } else {
+            statusMsg.textContent = 'התמונה נקלטה. לא זוהה מספר ברור – אנא הקלידי או בחרי מהרשימה.';
+          }
+        }
+      } catch (err) {
+        console.error('OCR/Image error:', err);
+        spinner.classList.add('hidden');
+        statusMsg.textContent = 'התמונה נשמרה. ניתן לבחור את האינקובטור ידנית למטה.';
+      }
+    };
+
+    window.matchIncubatorByNumber = function(val) {
+      const clean = (val || '').trim();
+      if (!clean) {
+        document.getElementById('scanResultBox').classList.add('hidden');
+        state.currentScannedEqId = null;
+        return;
+      }
+      const closedIncs = state.equipment.filter(isClosedIncubator);
+      const exact = closedIncs.find(eq => String(eq.inventoryNumber).trim() === clean);
+      if (exact) {
+        document.getElementById('scanIncubatorSelect').value = exact.id;
+        displayIncubatorScanResult(exact);
+      } else {
+        document.getElementById('scanIncubatorSelect').value = '';
+        document.getElementById('scanResultBox').classList.add('hidden');
+        state.currentScannedEqId = null;
+      }
+    };
+
+    window.onSelectIncubatorDropdown = function(eqId) {
+      if (!eqId) {
+        document.getElementById('scanResultBox').classList.add('hidden');
+        state.currentScannedEqId = null;
+        return;
+      }
+      const eq = state.equipment.find(e => e.id === eqId);
+      if (eq) {
+        document.getElementById('scanInvInput').value = eq.inventoryNumber;
+        displayIncubatorScanResult(eq);
+      }
+    };
+
+    function displayIncubatorScanResult(eq) {
+      state.currentScannedEqId = eq.id;
+      const fs = getFilterStatus(eq);
+      const box = document.getElementById('scanResultBox');
+      const icon = document.getElementById('scanResultIcon');
+      const title = document.getElementById('scanResultTitle');
+      const desc = document.getElementById('scanResultDesc');
+      const btn = document.getElementById('btnStartFilterDoc');
+
+      box.classList.remove('hidden');
+      document.getElementById('filterConfirmForm').classList.add('hidden');
+
+      if (fs.level === 'red' || fs.level === 'orange') {
+        const isRed = fs.level === 'red';
+        box.className = `rounded-2xl p-4 border-2 space-y-2 ${isRed ? 'bg-red-50 border-red-500 text-red-900' : 'bg-amber-50 border-amber-500 text-amber-900'}`;
+        icon.innerHTML = `<i class="fa-solid fa-triangle-exclamation ${isRed ? 'text-red-600' : 'text-amber-600'}"></i>`;
+        title.textContent = 'יש להחליף פילטר באינקובטור זה (מועד החלפה מתקרב/חלף)';
+        desc.innerHTML = `
+          אינקובטור <strong>#${escapeHtml(eq.inventoryNumber)}</strong> (${escapeHtml(eq.room || 'ללא חדר')})<br/>
+          החלפה אחרונה: <strong>${formatDisplayDate(eq.lastFilterDate)}</strong> · מועד יעד: <strong>${fs.nextDate ? formatDisplayDate(fs.nextDate) : 'מיידי'}</strong> (${fs.label})
+        `;
+        btn.className = `w-full py-2.5 rounded-xl font-extrabold text-sm shadow transition flex items-center justify-center gap-2 text-white ${isRed ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700'}`;
+        btn.innerHTML = '<i class="fa-solid fa-check-double"></i> תיעוד החלפת פילטר עכשיו';
+      } else {
+        box.className = 'rounded-2xl p-4 border-2 space-y-2 bg-emerald-50 border-emerald-500 text-emerald-900';
+        icon.innerHTML = '<i class="fa-solid fa-circle-check text-emerald-600"></i>';
+        title.textContent = 'פילטר תקין – אין צורך בהחלפה כעת';
+        desc.innerHTML = `
+          אינקובטור <strong>#${escapeHtml(eq.inventoryNumber)}</strong> (${escapeHtml(eq.room || 'ללא חדר')})<br/>
+          מועד ההחלפה הבא: <strong>${formatDisplayDate(fs.nextDate)}</strong> (${fs.label})
+        `;
+        btn.className = 'w-full py-2 rounded-xl font-bold text-xs border border-emerald-400 text-emerald-800 bg-white hover:bg-emerald-100 transition flex items-center justify-center gap-1.5';
+        btn.innerHTML = '<i class="fa-solid fa-rotate"></i> בכל זאת רוצה לתעד החלפה מוקדמת?';
+      }
+    }
+
+    window.revealFilterConfirmForm = function() {
+      document.getElementById('filterConfirmForm').classList.remove('hidden');
+      document.getElementById('filterFormError').classList.add('hidden');
+      document.getElementById('filterStaffInput').focus();
+    };
+
+    window.saveFilterReplacement = async function() {
+      const eq = state.equipment.find(e => e.id === state.currentScannedEqId);
+      const staffName = document.getElementById('filterStaffInput').value.trim();
+      const errEl = document.getElementById('filterFormError');
+
+      if (!eq) {
+        errEl.textContent = 'יש לבחור אינקובטור תקין.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      if (!staffName) {
+        errEl.textContent = 'שדה חובה: יש להזין או לבחור את שמך המלא לפני השמירה.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      const todayISO = formatDateISO(new Date());
+      const nextDateISO = addDaysISO(todayISO, 90);
+
+      // Update active user automatically
+      state.activeUserName = staffName;
+      document.getElementById('headerUserName').textContent = staffName;
+
+      const updatedEq = {
+        ...eq,
+        lastFilterDate: todayISO,
+        lastFilterBy: staffName
+      };
+
+      await saveEquipmentItem(updatedEq);
+      await appendActivityLog({
+        category: 'filter',
+        inventoryNumber: eq.inventoryNumber,
+        equipmentType: eq.equipmentType,
+        actionType: 'החלפת פילטר אוויר',
+        details: `הוחלף פילטר באינקובטור (${eq.room || 'ללא חדר'}). מועד החלפה הבא: ${formatDisplayDate(nextDateISO)}`,
+        performedBy: staffName,
+        photoDataUrl: state.currentScannedImage || ''
+      });
+
+      closeModal('filterScanModal');
+      showToast(`החלפת הפילטר לאינקובטור #${eq.inventoryNumber} תועדה! מועד הבא: ${formatDisplayDate(nextDateISO)}`, 'success');
+    };
+
+    // ==================== MANAGER: ADD / EDIT / DELETE EQUIPMENT ====================
+    window.openAddEditModal = function(eqId) {
+      if (!state.isManager) {
+        showToast('פעולה זו זמינה למנהלים בלבד', 'error');
+        return;
+      }
+      document.getElementById('addEditError').classList.add('hidden');
+      const delBtn = document.getElementById('deleteEqBtn');
+
+      if (eqId) {
+        const eq = state.equipment.find(e => e.id === eqId);
+        if (!eq) return;
+        document.getElementById('addEditModalTitle').textContent = `עריכת מכשיר #${eq.inventoryNumber}`;
+        document.getElementById('editEqId').value = eq.id;
+        document.getElementById('eqInvNum').value = eq.inventoryNumber || '';
+        document.getElementById('eqType').value = eq.equipmentType || '';
+        document.getElementById('eqDesc').value = eq.description || '';
+        document.getElementById('eqManufacturer').value = eq.manufacturer || '';
+        document.getElementById('eqModel').value = eq.model || '';
+        document.getElementById('eqSerial').value = eq.serialNumber || '';
+        document.getElementById('eqUnit').value = eq.unit || 'פגייה';
+        document.getElementById('eqRoom').value = eq.room || '';
+        document.getElementById('eqLocation').value = eq.locationDesc || '';
+        document.getElementById('eqMaintFreq').value = eq.maintFreqDays || 365;
+        document.getElementById('eqLastMaint').value = eq.lastMaintDate || '';
+        document.getElementById('eqNextMaint').value = eq.nextMaintDate || '';
+        document.getElementById('eqLastFilter').value = eq.lastFilterDate || '';
+        delBtn.classList.remove('hidden');
+      } else {
+        document.getElementById('addEditModalTitle').textContent = 'הוספת מכשיר חדש למאגר';
+        document.getElementById('editEqId').value = '';
+        ['eqInvNum', 'eqType', 'eqDesc', 'eqManufacturer', 'eqModel', 'eqSerial', 'eqRoom', 'eqLocation', 'eqLastMaint', 'eqNextMaint', 'eqLastFilter'].forEach(id => {
+          document.getElementById(id).value = '';
+        });
+        document.getElementById('eqUnit').value = 'פגייה';
+        document.getElementById('eqMaintFreq').value = 365;
+        delBtn.classList.add('hidden');
+      }
+
+      document.getElementById('addEditModal').classList.remove('hidden');
+    };
+
+    window.saveEquipmentForm = async function() {
+      const invNum = document.getElementById('eqInvNum').value.trim();
+      const eqType = document.getElementById('eqType').value.trim();
+      const errEl = document.getElementById('addEditError');
+
+      if (!invNum || !eqType) {
+        errEl.textContent = 'מספר אינוונטר וסוג ציוד הם שדות חובה.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      const existingId = document.getElementById('editEqId').value;
+      const existing = existingId ? state.equipment.find(e => e.id === existingId) : null;
+
+      const item = {
+        id: existingId || ('eq-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)),
+        unit: document.getElementById('eqUnit').value.trim() || 'פגייה',
+        inventoryNumber: invNum,
+        equipmentType: eqType,
+        description: document.getElementById('eqDesc').value.trim(),
+        manufacturer: document.getElementById('eqManufacturer').value.trim(),
+        model: document.getElementById('eqModel').value.trim(),
+        serialNumber: document.getElementById('eqSerial').value.trim(),
+        status: existing ? existing.status : 'תקין',
+        room: document.getElementById('eqRoom').value.trim(),
+        locationDesc: document.getElementById('eqLocation').value.trim(),
+        maintFreqDays: Number(document.getElementById('eqMaintFreq').value) || 365,
+        lastMaintDate: document.getElementById('eqLastMaint').value,
+        nextMaintDate: document.getElementById('eqNextMaint').value,
+        lastFilterDate: document.getElementById('eqLastFilter').value,
+        lastFilterBy: existing ? (existing.lastFilterBy || '') : '',
+        statusNote: existing ? (existing.statusNote || '') : ''
+      };
+
+      await saveEquipmentItem(item);
+      await appendActivityLog({
+        category: 'admin',
+        inventoryNumber: item.inventoryNumber,
+        equipmentType: item.equipmentType,
+        actionType: existing ? 'עריכת נתוני יסוד' : 'הוספת מכשיר חדש',
+        details: `${item.equipmentType} (${item.manufacturer} ${item.model})`,
+        performedBy: state.activeUserName || 'מנהל מחלקה'
+      });
+
+      closeModal('addEditModal');
+      showToast(existing ? 'פרטי המכשיר עודכנו' : 'מכשיר חדש נוסף למאגר', 'success');
+    };
+
+    window.confirmDeleteEquipment = function() {
+      const eqId = document.getElementById('editEqId').value;
+      const eq = state.equipment.find(e => e.id === eqId);
+      if (!eq) return;
+
+      openConfirmDialog(
+        'אישור גריעת מכשיר',
+        `האם לגרוע ולהסיר לצמיתות את מכשיר #${eq.inventoryNumber} (${eq.equipmentType}) מהמאגר?`,
+        async () => {
+          await removeEquipmentItem(eq.id);
+          await appendActivityLog({
+            category: 'admin',
+            inventoryNumber: eq.inventoryNumber,
+            equipmentType: eq.equipmentType,
+            actionType: 'גריעת מכשיר',
+            details: `הוסר מהמאגר ע"י מנהל`,
+            performedBy: state.activeUserName || 'מנהל מחלקה'
+          });
+          closeModal('addEditModal');
+          showToast('המכשיר נגרע מהמאגר', 'info');
+        }
+      );
+    };
+
+    // ==================== MANAGER: STAFF MANAGEMENT ====================
+    window.openStaffManagerModal = function() {
+      renderStaffManagerList();
+      document.getElementById('staffManagerModal').classList.remove('hidden');
+    };
+
+    function renderStaffManagerList() {
+      const el = document.getElementById('staffManagerList');
+      el.innerHTML = state.staffList.map((name, idx) => `
+        <div class="flex items-center justify-between px-3 py-2.5 text-sm">
+          <span class="font-medium text-slate-700">${escapeHtml(name)}</span>
+          <button onclick="removeStaffMember(${idx})" class="text-red-500 hover:text-red-700 text-xs font-bold px-2 py-1 rounded hover:bg-red-50">
+            <i class="fa-solid fa-trash"></i>
+          </button>
+        </div>
+      `).join('');
+    }
+
+    window.addStaffMember = async function() {
+      const input = document.getElementById('newStaffNameInput');
+      const name = input.value.trim();
+      if (!name) return;
+      if (!state.staffList.includes(name)) {
+        state.staffList.push(name);
+        await saveStaffListToCloud();
+        renderStaffManagerList();
+      }
+      input.value = '';
+    };
+
+    window.removeStaffMember = async function(idx) {
+      state.staffList.splice(idx, 1);
+      await saveStaffListToCloud();
+      renderStaffManagerList();
+    };
+
+    // ==================== EXCEL (.XLSX) IMPORT & EXPORT ====================
+    window.openExcelImportModal = function() {
+      if (!state.isManager) {
+        showToast('ייבוא קובץ Excel זמין למנהלים בלבד', 'error');
+        return;
+      }
+      document.getElementById('excelFileInput').value = '';
+      document.getElementById('importProgressMsg').classList.add('hidden');
+      document.getElementById('excelImportModal').classList.remove('hidden');
+    };
+
+    window.processExcelImport = async function() {
+      const fileInput = document.getElementById('excelFileInput');
+      const file = fileInput.files[0];
+      if (!file) {
+        showToast('אנא בחר/י קובץ Excel לייבוא', 'error');
+        return;
+      }
+
+      const mode = document.getElementById('importModeSelect').value;
+      const progress = document.getElementById('importProgressMsg');
+      progress.classList.remove('hidden');
+
+      try {
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+        const sheetName = workbook.SheetNames.includes('גיליון1') ? 'גיליון1' : workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+        // Auto-detect header row (handles header=1 as in 'אינוונטר 11.26.xlsx' or header=0)
+        let headerRowIdx = 0;
+        for (let i = 0; i < Math.min(6, rows.length); i++) {
+          const joined = rows[i].map(c => String(c || '').trim()).join('|');
+          if (joined.includes('סוג ציוד') || joined.includes('מספר ציוד')) {
+            headerRowIdx = i;
+            break;
+          }
+        }
+
+        const headers = rows[headerRowIdx].map(h => String(h || '').trim());
+        const findCol = (keywords) => headers.findIndex(h => keywords.some(k => h.includes(k)));
+
+        const colUnit = findCol(['יחידה']);
+        const colInv = findCol(['מספר ציוד', 'אינוונטר']);
+        const colType = findCol(['סוג ציוד']);
+        const colDesc = findCol(['תיאור ציוד']);
+        const colMfg = findCol(['יצרן']);
+        const colModel = findCol(['דגם']);
+        const colSerial = findCol(['סידורי']);
+        const colStatus = findCol(['סטטוס']);
+        const colRoom = findCol(['חדר']);
+        const colLoc = findCol(['תיאור חדר', 'מיקום']);
+        const colFreq = findCol(['תדירות']);
+        const colLastM = findCol(['טיפול אחרון']);
+        const colNextM = findCol(['טיפול הבא']);
+        const colLastF = findCol(['פילטר אחרון', 'החלפת פילטר']);
+
+        const existingByInv = new Map(state.equipment.map(e => [String(e.inventoryNumber).trim(), e]));
+        const importedItems = [];
+
+        for (let r = headerRowIdx + 1; r < rows.length; r++) {
+          const row = rows[r];
+          if (!row || row.every(cell => String(cell || '').trim() === '')) continue;
+
+          const invNum = colInv >= 0 ? String(row[colInv] || '').trim() : '';
+          const eqType = colType >= 0 ? String(row[colType] || '').trim() : '';
+          if (!invNum && !eqType) continue;
+
+          const safeInv = invNum || `AUTO-${r}`;
+          const prev = existingByInv.get(safeInv);
+
+          let rawStatus = colStatus >= 0 ? String(row[colStatus] || '').trim() : '';
+          if (!rawStatus || rawStatus === 'פעיל') rawStatus = 'תקין';
+
+          importedItems.push({
+            id: prev ? prev.id : ('eq-' + safeInv.replace(/[^a-zA-Z0-9_-]/g, '') + '-' + r),
+            unit: colUnit >= 0 ? String(row[colUnit] || '').trim() : 'פגייה',
+            inventoryNumber: safeInv,
+            equipmentType: eqType || 'כללי',
+            description: colDesc >= 0 ? String(row[colDesc] || '').trim() : '',
+            manufacturer: colMfg >= 0 ? String(row[colMfg] || '').trim() : '',
+            model: colModel >= 0 ? String(row[colModel] || '').trim() : '',
+            serialNumber: colSerial >= 0 ? String(row[colSerial] || '').trim() : '',
+            status: prev && mode === 'merge' ? prev.status : rawStatus,
+            room: colRoom >= 0 ? String(row[colRoom] || '').trim() : '',
+            locationDesc: colLoc >= 0 ? String(row[colLoc] || '').trim() : '',
+            maintFreqDays: colFreq >= 0 ? (Number(row[colFreq]) || 365) : 365,
+            lastMaintDate: colLastM >= 0 ? parseExcelDate(row[colLastM]) : '',
+            nextMaintDate: colNextM >= 0 ? parseExcelDate(row[colNextM]) : '',
+            lastFilterDate: (colLastF >= 0 && row[colLastF]) ? parseExcelDate(row[colLastF]) : (prev ? (prev.lastFilterDate || '') : ''),
+            lastFilterBy: prev ? (prev.lastFilterBy || '') : '',
+            statusNote: prev ? (prev.statusNote || '') : ''
+          });
+        }
+
+        if (importedItems.length === 0) {
+          progress.classList.add('hidden');
+          showToast('לא נמצאו שורות ציוד תקינות בקובץ', 'error');
+          return;
+        }
+
+        if (useCloud && currentUser && db) {
+          // If replace mode, delete old docs in chunks of 400
+          if (mode === 'replace') {
+            for (let i = 0; i < state.equipment.length; i += 400) {
+              const delBatch = writeBatch(db);
+              state.equipment.slice(i, i + 400).forEach(old => {
+                delBatch.delete(getPublicDoc('equipment', old.id));
+              });
+              await delBatch.commit();
+            }
+          }
+          // Write imported items in chunks of 400 (supports 410+ items seamlessly!)
+          for (let i = 0; i < importedItems.length; i += 400) {
+            const setBatch = writeBatch(db);
+            importedItems.slice(i, i + 400).forEach(item => {
+              setBatch.set(getPublicDoc('equipment', item.id), item);
+            });
+            await setBatch.commit();
+          }
+        } else {
+          if (mode === 'replace') {
+            state.equipment = importedItems;
+          } else {
+            const map = new Map(state.equipment.map(e => [e.id, e]));
+            importedItems.forEach(item => map.set(item.id, item));
+            state.equipment = Array.from(map.values());
+          }
+          renderAll();
+        }
+
+        await appendActivityLog({
+          category: 'admin',
+          inventoryNumber: 'EXCEL',
+          equipmentType: 'ייבוא מאגר',
+          actionType: 'ייבוא קובץ Excel',
+          details: `יובאו ${importedItems.length} פריטי ציוד מקובץ ${file.name}`,
+          performedBy: state.activeUserName || 'מנהל מחלקה'
+        });
+
+        closeModal('excelImportModal');
+        showToast(`יובאו בהצלחה ${importedItems.length} פריטי ציוד!`, 'success');
+      } catch (err) {
+        console.error('Excel import error:', err);
+        progress.classList.add('hidden');
+        showToast('שגיאה בקריאת קובץ האקסל. ודא שהקובץ תקין.', 'error');
+      }
+    };
+
+    window.exportToExcel = function() {
+      try {
+        const wb = XLSX.utils.book_new();
+
+        // Sheet 1: Full Inventory
+        const invRows = state.equipment.map(eq => {
+          const isInc = isClosedIncubator(eq);
+          const fs = isInc ? getFilterStatus(eq) : null;
+          return {
+            'יחידה': eq.unit || '',
+            'מספר ציוד/אינוונטר': eq.inventoryNumber || '',
+            'סוג ציוד': eq.equipmentType || '',
+            'תיאור ציוד': eq.description || '',
+            'יצרן': eq.manufacturer || '',
+            'דגם': eq.model || '',
+            "מס' סידורי": eq.serialNumber || '',
+            'סטטוס': eq.status || '',
+            'חדר': eq.room || '',
+            'תיאור חדר/מיקום': eq.locationDesc || '',
+            'תדירות טיפול בימים מ.רפואי': eq.maintFreqDays || '',
+            'תאריך טיפול אחרון': eq.lastMaintDate || '',
+            'תאריך טיפול הבא מ.רפואי': eq.nextMaintDate || '',
+            'תאריך החלפת פילטר אחרון': eq.lastFilterDate || '',
+            'תאריך החלפת פילטר הבא': fs ? (fs.nextDate || '') : '',
+            'בוצע פילטר ע"י': eq.lastFilterBy || '',
+            'הערות סטטוס': eq.statusNote || ''
+          };
+        });
+        const wsInv = XLSX.utils.json_to_sheet(invRows);
+        XLSX.utils.book_append_sheet(wb, wsInv, 'אינוונטר מחלקתי');
+
+        // Sheet 2: Incubator Filters Status
+        const incRows = state.equipment.filter(isClosedIncubator).map(eq => {
+          const fs = getFilterStatus(eq);
+          return {
+            'מספר אינוונטר': eq.inventoryNumber,
+            'סוג ציוד': eq.equipmentType,
+            'דגם': eq.model || '',
+            'חדר/מיקום': `${eq.room || ''} ${eq.locationDesc || ''}`.trim(),
+            'סטטוס רמזור': fs.level === 'red' ? 'אדום - דחוף' : fs.level === 'orange' ? 'כתום - מתקרב' : 'ירוק - תקין',
+            'החלפה אחרונה': eq.lastFilterDate || 'לא תועד',
+            'מועד החלפה הבא': fs.nextDate || 'מיידי',
+            'מבצעת אחרונה': eq.lastFilterBy || ''
+          };
+        });
+        const wsInc = XLSX.utils.json_to_sheet(incRows);
+        XLSX.utils.book_append_sheet(wb, wsInc, 'פילטרים אינקובטורים');
+
+        // Sheet 3: Full Activity Logs
+        const logRows = state.logs.map(l => ({
+          'תאריך ושעה': formatDateTime(l.timestamp),
+          'מספר אינוונטר': l.inventoryNumber || '',
+          'סוג ציוד': l.equipmentType || '',
+          'סוג פעולה': l.actionType || '',
+          'פירוט': l.details || '',
+          'שם מבצע/ת': l.performedBy || '',
+          'כולל תמונת מדבקה': l.photoDataUrl ? 'כן' : 'לא'
+        }));
+        const wsLogs = XLSX.utils.json_to_sheet(logRows);
+        XLSX.utils.book_append_sheet(wb, wsLogs, 'לוג פעילות והיסטוריה');
+
+        const dateTag = formatDateISO(new Date());
+        XLSX.writeFile(wb, `דוח_אינוונטר_פגייה_${dateTag}.xlsx`);
+        showToast('קובץ האקסל הורד בהצלחה', 'success');
+      } catch (err) {
+        console.error('Excel export error:', err);
+        showToast('שגיאה בייצוא הקובץ', 'error');
+      }
+    };
+
+    // ==================== MODALS, LIGHTBOX & TOAST HELPERS ====================
+    window.closeModal = function(id) {
+      document.getElementById(id).classList.add('hidden');
+    };
+
+    window.openLightbox = function(logId) {
+      const log = state.logs.find(l => l.id === logId);
+      if (!log || !log.photoDataUrl) return;
+      document.getElementById('lightboxImg').src = log.photoDataUrl;
+      document.getElementById('lightboxCaption').textContent = `אינקובטור #${log.inventoryNumber} · ${log.performedBy} (${formatDateTime(log.timestamp)})`;
+      document.getElementById('lightboxModal').classList.remove('hidden');
+    };
+
+    function openConfirmDialog(title, msg, onConfirm) {
+      document.getElementById('confirmModalTitle').textContent = title;
+      document.getElementById('confirmModalMsg').textContent = msg;
+      const okBtn = document.getElementById('confirmModalOkBtn');
+      const newBtn = okBtn.cloneNode(true);
+      okBtn.parentNode.replaceChild(newBtn, okBtn);
+      newBtn.addEventListener('click', () => {
+        closeModal('confirmModal');
+        onConfirm();
+      });
+      document.getElementById('confirmModal').classList.remove('hidden');
+    }
+
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      const colors = {
+        success: 'bg-emerald-700 text-white',
+        error: 'bg-red-700 text-white',
+        info: 'bg-medical-dark text-white'
+      };
+      const icons = {
+        success: 'fa-circle-check',
+        error: 'fa-circle-exclamation',
+        info: 'fa-circle-info'
+      };
+      toast.className = `${colors[type] || colors.info} px-4 py-3 rounded-xl shadow-lg text-xs sm:text-sm font-bold flex items-center gap-2 pointer-events-auto transition-all duration-300`;
+      toast.innerHTML = `<i class="fa-solid ${icons[type] || icons.info}"></i><span>${escapeHtml(message)}</span>`;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.classList.add('opacity-0', '-translate-y-2');
+        setTimeout(() => toast.remove(), 300);
+      }, 3200);
+    }
+
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    // ==================== APP INITIALIZATION ====================
+    window.renderInventory = renderInventory;
+    window.renderIncubatorFilters = renderIncubatorFilters;
+    window.renderDashboard = renderDashboard;
+
+    window.onload = function() {
+      switchTab('inventory');
+      initCloudSync();
+    };
+  </script>
+</body>
+</html>
