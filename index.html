@@ -296,7 +296,14 @@
         </div>
 
         <div class="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 pt-1">
-          <span id="inventoryCountLabel" class="font-semibold text-medical-dark">מציג 0 פריטים</span>
+          <div class="flex items-center gap-3 flex-wrap">
+            <span id="inventoryCountLabel" class="font-semibold text-medical-dark">מציג 0 פריטים</span>
+            <select id="inventorySortSelect" onchange="renderInventory()" class="px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 text-xs font-semibold text-medical-dark outline-none focus:border-medical-teal">
+              <option value="recent">מיון: עודכנו/נוספו לאחרונה</option>
+              <option value="inv">מיון: לפי מס' אינוונטר</option>
+              <option value="type">מיון: לפי סוג ציוד</option>
+            </select>
+          </div>
           <button onclick="resetInventoryFilters()" class="text-burgundy hover:underline font-medium">
             <i class="fa-solid fa-rotate-left ml-1"></i>איפוס סינון
           </button>
@@ -1188,6 +1195,7 @@
       getFirestore,
       collection,
       doc,
+      getDoc,
       setDoc,
       updateDoc,
       deleteDoc,
@@ -1251,7 +1259,6 @@
 
     const FILTER_INCUBATOR_TYPES = ['אינקובטור לתינוק', 'אינקובטור'];
     const ALL_KNOWN_TYPES = CATEGORIES.filter(c => c.types).flatMap(c => c.types);
-    const LOCAL_STORAGE_KEY = 'nicu_inventory_local_v2';
 
     // ==================== APPLICATION STATE ====================
     let db = null;
@@ -1260,6 +1267,8 @@
     let useCloud = false;
     let isImporting = false;
     let hasSeededChecked = false;
+    let initialEquipmentLoaded = false;
+    let lastKnownMetaTimestamp = 0;
     let deferredInstallPrompt = null;
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'nicu-inventory-app';
 
@@ -1287,6 +1296,7 @@
       managerPin: '1234',
       activeTab: 'inventory',
       selectedCategory: 'all',
+      inventoryDisplayLimit: 120,
       filterTraffic: 'all',
       logFilter: 'all',
       scanMatchedEqId: null,
@@ -1294,6 +1304,18 @@
     };
 
     // ==================== UTILITY FUNCTIONS ====================
+    // Remove undefined fields so Firestore setDoc/updateDoc never fail
+    function cleanForFirestore(obj) {
+      const cleaned = {};
+      Object.keys(obj || {}).forEach((key) => {
+        const val = obj[key];
+        if (val !== undefined) {
+          cleaned[key] = val;
+        }
+      });
+      return cleaned;
+    }
+
     function escapeHtml(str) {
       if (str === null || str === undefined) return '';
       return String(str)
@@ -1481,40 +1503,7 @@
       document.getElementById('imageViewerModal').classList.remove('hidden');
     };
 
-    // ==================== LOCAL PERSISTENCE & SAMPLE DATA ====================
-    function saveLocalState() {
-      try {
-        const payload = {
-          equipment: state.equipment,
-          logs: state.logs.slice(0, 200),
-          staffList: state.staffList,
-          staffRoles: state.staffRoles,
-          permissions: state.permissions,
-          managerPin: state.managerPin
-        };
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
-      } catch (err) {
-        console.warn('LocalStorage save warning:', err);
-      }
-    }
-
-    function loadLocalState() {
-      try {
-        const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-        if (!raw) return false;
-        const data = JSON.parse(raw);
-        if (Array.isArray(data.equipment)) state.equipment = data.equipment;
-        if (Array.isArray(data.logs)) state.logs = data.logs;
-        if (Array.isArray(data.staffList)) state.staffList = data.staffList;
-        if (data.staffRoles) state.staffRoles = data.staffRoles;
-        if (data.permissions) state.permissions = { ...state.permissions, ...data.permissions };
-        if (data.managerPin) state.managerPin = String(data.managerPin);
-        return state.equipment.length > 0;
-      } catch (err) {
-        return false;
-      }
-    }
-
+    // ==================== INITIAL SAMPLE DATA (ONLY FOR EMPTY NEW DB) ====================
     function buildSampleSeedData() {
       const todayIso = new Date().toISOString().slice(0, 10);
       return [
@@ -1660,7 +1649,27 @@
       if (!badge) return;
       badge.innerHTML = isOnline
         ? `<i class="fa-solid fa-cloud-check text-emerald-300"></i> ${escapeHtml(statusText)}`
-        : `<i class="fa-solid fa-hard-drive text-amber-300"></i> ${escapeHtml(statusText)}`;
+        : `<i class="fa-solid fa-triangle-exclamation text-amber-300"></i> ${escapeHtml(statusText)}`;
+    }
+
+    async function touchSharedMeta(actionDesc) {
+      if (!useCloud || !currentUser || !db) return;
+      const now = Date.now();
+      lastKnownMetaTimestamp = now;
+      try {
+        await setDoc(
+          getPublicDoc('settings', 'meta'),
+          {
+            initialized: true,
+            lastUpdatedAt: now,
+            lastUpdatedBy: state.activeUserName || (state.isManager ? 'מנהל מחלקה' : 'צוות מחלקה'),
+            lastAction: actionDesc || 'עדכון נתונים'
+          },
+          { merge: true }
+        );
+      } catch (err) {
+        console.error('Meta sync update error:', err);
+      }
     }
 
     async function initFirebaseAndData() {
@@ -1674,58 +1683,86 @@
         auth = getAuth(app);
         db = getFirestore(app);
 
+        // Authenticate first (custom token priority, with anonymous fallback)
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          const cred = await signInWithCustomToken(auth, __initial_auth_token);
-          currentUser = cred.user;
+          try {
+            const cred = await signInWithCustomToken(auth, __initial_auth_token);
+            currentUser = cred.user;
+          } catch (tokenErr) {
+            console.warn('Custom token sign-in failed, falling back to anonymous auth:', tokenErr);
+            const cred = await signInAnonymously(auth);
+            currentUser = cred.user;
+          }
         } else {
           const cred = await signInAnonymously(auth);
           currentUser = cred.user;
         }
 
+        if (!currentUser) {
+          throw new Error('Authentication failed');
+        }
+
         useCloud = true;
-        updateSyncBadge('מסונכרן בענן', true);
+        updateSyncBadge('מסונכרן שיתופית בענן', true);
         subscribeToFirestore();
       } catch (err) {
-        console.info('Running in local persistence mode:', err.message);
+        console.warn('Cloud database unavailable, running in session memory:', err.message);
         useCloud = false;
-        updateSyncBadge('מצב מקומי', false);
-        const loaded = loadLocalState();
-        if (!loaded) {
+        updateSyncBadge('ללא חיבור ענן (זמני)', false);
+        if (state.equipment.length === 0) {
           state.equipment = buildSampleSeedData();
-          saveLocalState();
         }
         refreshAllViews();
       }
     }
 
     function subscribeToFirestore() {
-      // 1. Equipment listener
+      if (!currentUser || !db) return;
+
+      // 1. Shared Equipment listener (real-time for all staff & manager)
       onSnapshot(
         getPublicCollection('equipment'),
         async (snapshot) => {
           if (isImporting) return;
           const items = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
           if (items.length === 0 && !hasSeededChecked) {
             hasSeededChecked = true;
-            const samples = buildSampleSeedData();
-            const batch = writeBatch(db);
-            samples.forEach(item => {
-              batch.set(getPublicDoc('equipment', item.id), item);
-            });
-            batch.set(getPublicDoc('settings', 'meta'), { initialized: true, updatedAt: Date.now() });
-            await batch.commit();
-            return;
+            try {
+              const metaSnap = await getDoc(getPublicDoc('settings', 'meta'));
+              if (!metaSnap.exists() || !metaSnap.data()?.initialized) {
+                const samples = buildSampleSeedData();
+                const batch = writeBatch(db);
+                samples.forEach(item => {
+                  batch.set(getPublicDoc('equipment', item.id), cleanForFirestore(item));
+                });
+                batch.set(getPublicDoc('settings', 'meta'), {
+                  initialized: true,
+                  lastUpdatedAt: Date.now(),
+                  lastUpdatedBy: 'מערכת',
+                  lastAction: 'אתחול ראשוני'
+                });
+                await batch.commit();
+                return;
+              }
+            } catch (seedErr) {
+              console.error('Initial seed check error:', seedErr);
+            }
           }
+
           state.equipment = items;
+          initialEquipmentLoaded = true;
+          updateSyncBadge(`מסונכרן שיתופית • ${items.length} פריטים`, true);
           refreshAllViews();
         },
         (error) => {
           console.error('Equipment snapshot error:', error);
-          updateSyncBadge('שגיאת סנכרון', false);
+          updateSyncBadge('שגיאת סנכרון ענן', false);
+          showToast('שגיאה בסנכרון הנתונים מהענן', 'error');
         }
       );
 
-      // 2. Activity logs listener
+      // 2. Shared Activity logs listener
       onSnapshot(
         getPublicCollection('logs'),
         (snapshot) => {
@@ -1740,10 +1777,12 @@
         }
       );
 
-      // 3. Settings (staff list, roles, permissions, metadata & manager PIN) listener
+      // 3. Shared Settings (staff list, roles, permissions, metadata & manager PIN) listener
       onSnapshot(
         getPublicCollection('settings'),
         (snapshot) => {
+          let settingsChanged = false;
+
           const staffDoc = snapshot.docs.find(d => d.id === 'staff');
           if (staffDoc) {
             const sData = staffDoc.data();
@@ -1753,18 +1792,38 @@
             if (!document.getElementById('staffManagerModal').classList.contains('hidden')) {
               renderStaffManagerList();
             }
+            settingsChanged = true;
           }
+
           const permDoc = snapshot.docs.find(d => d.id === 'permissions');
           if (permDoc) {
             state.permissions = { ...state.permissions, ...permDoc.data() };
+            settingsChanged = true;
           }
+
           const secDoc = snapshot.docs.find(d => d.id === 'security');
           if (secDoc && secDoc.data().managerPin) {
             state.managerPin = String(secDoc.data().managerPin);
           }
+
           const metaDoc = snapshot.docs.find(d => d.id === 'meta');
-          if (metaDoc && metaDoc.data().initialized) {
-            hasSeededChecked = true;
+          if (metaDoc) {
+            const mData = metaDoc.data();
+            if (mData.initialized) hasSeededChecked = true;
+            if (
+              initialEquipmentLoaded &&
+              mData.lastUpdatedAt &&
+              mData.lastUpdatedAt > lastKnownMetaTimestamp
+            ) {
+              if (lastKnownMetaTimestamp > 0 && mData.lastAction) {
+                showToast(`הנתונים עודכנו בזמן אמת: ${mData.lastAction}`, 'info');
+              }
+              lastKnownMetaTimestamp = mData.lastUpdatedAt;
+            }
+          }
+
+          if (settingsChanged && initialEquipmentLoaded) {
+            refreshAllViews();
           }
         },
         (error) => {
@@ -1774,62 +1833,61 @@
     }
 
     // ==================== DATA MUTATION HELPERS ====================
-    async function saveEquipmentRecord(eqObj) {
-      const record = {
+    async function saveEquipmentRecord(eqObj, actionDesc = 'עדכון מכשיר') {
+      const record = cleanForFirestore({
         ...eqObj,
         lastUpdatedAt: Date.now(),
         lastUpdatedBy: state.activeUserName || (state.isManager ? 'מנהל מחלקה' : 'צוות מחלקה')
-      };
+      });
       if (useCloud && currentUser && db) {
         await setDoc(getPublicDoc('equipment', record.id), record, { merge: true });
+        await touchSharedMeta(actionDesc);
       } else {
         const idx = state.equipment.findIndex(e => e.id === record.id);
         if (idx >= 0) state.equipment[idx] = { ...state.equipment[idx], ...record };
         else state.equipment.push(record);
-        saveLocalState();
         refreshAllViews();
       }
     }
 
-    async function deleteEquipmentRecord(eqId) {
+    async function deleteEquipmentRecord(eqId, actionDesc = 'מחיקת מכשיר') {
       if (useCloud && currentUser && db) {
         await deleteDoc(getPublicDoc('equipment', eqId));
+        await touchSharedMeta(actionDesc);
       } else {
         state.equipment = state.equipment.filter(e => e.id !== eqId);
-        saveLocalState();
         refreshAllViews();
       }
     }
 
     async function appendActivityLog(entry) {
       const autoApprove = state.isManager || !state.permissions.requireManagerApproval;
-      const logEntry = {
+      const logEntry = cleanForFirestore({
         timestamp: Date.now(),
         approvalStatus: entry.approvalStatus || (autoApprove ? 'approved' : 'pending'),
         reviewedBy: autoApprove ? (state.isManager ? (state.activeUserName || 'מנהל מחלקה') : 'אישור אוטומטי') : '',
         reviewedAt: autoApprove ? Date.now() : null,
-        snapshotBefore: entry.snapshotBefore || null,
+        snapshotBefore: entry.snapshotBefore ? cleanForFirestore(entry.snapshotBefore) : null,
         equipmentId: entry.equipmentId || '',
         ...entry
-      };
+      });
       if (useCloud && currentUser && db) {
         await addDoc(getPublicCollection('logs'), logEntry);
       } else {
         logEntry.id = 'LOG-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
         state.logs.unshift(logEntry);
-        saveLocalState();
         renderDashboard();
         updatePendingLogBadges();
       }
     }
 
     async function updateLogRecord(logId, patch) {
+      const cleanPatch = cleanForFirestore(patch);
       if (useCloud && currentUser && db) {
-        await updateDoc(getPublicDoc('logs', logId), patch);
+        await updateDoc(getPublicDoc('logs', logId), cleanPatch);
       } else {
         const idx = state.logs.findIndex(l => l.id === logId);
-        if (idx >= 0) state.logs[idx] = { ...state.logs[idx], ...patch };
-        saveLocalState();
+        if (idx >= 0) state.logs[idx] = { ...state.logs[idx], ...cleanPatch };
         renderDashboard();
         updatePendingLogBadges();
       }
@@ -1842,8 +1900,7 @@
           roles: state.staffRoles,
           updatedAt: Date.now()
         });
-      } else {
-        saveLocalState();
+        await touchSharedMeta('עדכון רשימת צוות והרשאות');
       }
       populateStaffDropdowns();
       renderStaffManagerList();
@@ -1982,12 +2039,19 @@
 
     window.selectCategory = function(catId) {
       state.selectedCategory = catId;
+      state.inventoryDisplayLimit = 120;
       renderCategoryButtons();
+      renderInventory();
+    };
+
+    window.loadMoreInventory = function() {
+      state.inventoryDisplayLimit += 120;
       renderInventory();
     };
 
     window.resetInventoryFilters = function() {
       state.selectedCategory = 'all';
+      state.inventoryDisplayLimit = 120;
       document.getElementById('searchInput').value = '';
       document.getElementById('statusFilter').value = '';
       document.getElementById('locationFilter').value = '';
@@ -2022,6 +2086,7 @@
       const statusVal = document.getElementById('statusFilter')?.value || '';
       const locVal = document.getElementById('locationFilter')?.value || '';
       const bioVal = document.getElementById('bioAlertFilter')?.value || '';
+      const sortVal = document.getElementById('inventorySortSelect')?.value || 'recent';
       const activeCat = CATEGORIES.find(c => c.id === state.selectedCategory);
 
       const filtered = state.equipment.filter(eq => {
@@ -2043,6 +2108,19 @@
         return true;
       });
 
+      // Consistent sorting across all devices so newly added/edited items by manager appear immediately
+      filtered.sort((a, b) => {
+        if (sortVal === 'inv') {
+          return String(a.inventoryNumber || '').localeCompare(String(b.inventoryNumber || ''), 'he', { numeric: true });
+        }
+        if (sortVal === 'type') {
+          return String(a.type || '').localeCompare(String(b.type || ''), 'he');
+        }
+        const diff = (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0);
+        if (diff !== 0) return diff;
+        return String(a.inventoryNumber || '').localeCompare(String(b.inventoryNumber || ''), 'he', { numeric: true });
+      });
+
       if (countLabel) {
         countLabel.textContent = `מציג ${filtered.length} מתוך ${state.equipment.length} פריטים`;
       }
@@ -2058,7 +2136,7 @@
         return;
       }
 
-      const displayList = filtered.slice(0, 120);
+      const displayList = filtered.slice(0, state.inventoryDisplayLimit);
       grid.innerHTML = displayList.map(eq => {
         const bio = getBioAlertStatus(eq);
         let bioBadge = '';
@@ -2120,8 +2198,16 @@
         `;
       }).join('');
 
-      if (filtered.length > 120) {
-        grid.innerHTML += `<div class="col-span-full text-center text-xs text-slate-500 py-2">מוצגים 120 הפריטים הראשונים מתוך ${filtered.length}. השתמש/י בחיפוש או בסינון למיקוד התוצאות.</div>`;
+      if (filtered.length > state.inventoryDisplayLimit) {
+        grid.innerHTML += `
+          <div class="col-span-full flex flex-col items-center gap-2 py-3">
+            <div class="text-xs text-slate-500">מוצגים ${displayList.length} מתוך ${filtered.length} פריטים.</div>
+            <button onclick="loadMoreInventory()" class="bg-white hover:bg-slate-50 border border-slate-300 text-medical-dark font-bold text-xs px-5 py-2 rounded-xl shadow-sm transition">
+              <i class="fa-solid fa-chevron-down ml-1"></i>
+              הצג עוד פריטים (${filtered.length - displayList.length} נוספים)
+            </button>
+          </div>
+        `;
       }
     };
 
@@ -2822,141 +2908,88 @@
       }
 
       state.managerPin = nw;
-      if (useCloud && currentUser && db) {
-        await setDoc(getPublicDoc('settings', 'security'), { managerPin: nw, updatedAt: Date.now() }, { merge: true });
-      } else {
-        saveLocalState();
-      }
+      try {
+        if (useCloud && currentUser && db) {
+          await setDoc(getPublicDoc('settings', 'security'), { managerPin: nw, updatedAt: Date.now() }, { merge: true });
+          await touchSharedMeta('שינוי קוד מנהל');
+        }
 
-      await appendActivityLog({
-        category: 'admin',
-        inventoryNumber: 'PIN',
-        equipmentType: 'אבטחה',
-        actionType: 'שינוי קוד מנהל',
-        details: 'קוד הגישה למנהל עודכן בהצלחה.',
-        performedBy: state.activeUserName || 'מנהל מחלקה',
-        approvalStatus: 'approved'
-      });
-
-      closeModal('changePinModal');
-      showToast('קוד המנהל עודכן ונשמר בהצלחה!', 'success');
-    };
-
-    // ==================== MANAGER PERMISSIONS MODAL & QUICK REMOVAL ====================
-    window.openPermissionsModal = function() {
-      if (!state.isManager) return;
-      document.getElementById('permAllowStatus').checked = Boolean(state.permissions.allowStaffStatusUpdate);
-      document.getElementById('permAllowFilter').checked = Boolean(state.permissions.allowStaffFilterReplace);
-      document.getElementById('permAllowExport').checked = Boolean(state.permissions.allowStaffExportExcel);
-      document.getElementById('permAllowFreeText').checked = Boolean(state.permissions.allowFreeTextUser);
-      document.getElementById('permRequireApproval').checked = Boolean(state.permissions.requireManagerApproval);
-      document.getElementById('quickRemoveSearch').value = '';
-      document.getElementById('quickRemoveResults').classList.add('hidden');
-      updatePendingLogBadges();
-      document.getElementById('permissionsModal').classList.remove('hidden');
-    };
-
-    window.saveSystemPermissions = async function() {
-      if (!state.isManager) return;
-      state.permissions = {
-        allowStaffStatusUpdate: document.getElementById('permAllowStatus').checked,
-        allowStaffFilterReplace: document.getElementById('permAllowFilter').checked,
-        allowStaffExportExcel: document.getElementById('permAllowExport').checked,
-        allowFreeTextUser: document.getElementById('permAllowFreeText').checked,
-        requireManagerApproval: document.getElementById('permRequireApproval').checked
-      };
-
-      if (useCloud && currentUser && db) {
-        await setDoc(getPublicDoc('settings', 'permissions'), {
-          ...state.permissions,
-          updatedAt: Date.now(),
-          updatedBy: state.activeUserName || 'מנהל מחלקה'
+        await appendActivityLog({
+          category: 'admin',
+          inventoryNumber: 'PIN',
+          equipmentType: 'אבטחה',
+          actionType: 'שינוי קוד מנהל',
+          details: 'קוד הגישה למנהל עודכן בהצלחה.',
+          performedBy: state.activeUserName || 'מנהל מחלקה',
+          approvalStatus: 'approved'
         });
-      } else {
-        saveLocalState();
+
+        closeModal('changePinModal');
+        showToast('קוד המנהל עודכן ונשמר בענן לכל המכשירים!', 'success');
+      } catch (err) {
+        console.error('Save PIN error:', err);
+        showToast('שגיאה בשמירת קוד המנהל בענן', 'error');
       }
-
-      await appendActivityLog({
-        category: 'admin',
-        inventoryNumber: 'PERMS',
-        equipmentType: 'הרשאות מערכת',
-        actionType: 'עדכון הרשאות מנהל',
-        details: `עודכנו הרשאות מערכת (עדכון סטטוס: ${state.permissions.allowStaffStatusUpdate ? 'כן' : 'לא'}, פילטרים: ${state.permissions.allowStaffFilterReplace ? 'כן' : 'לא'}, ייצוא: ${state.permissions.allowStaffExportExcel ? 'כן' : 'לא'}, אישור מנהל: ${state.permissions.requireManagerApproval ? 'נדרש' : 'אוטומטי'})`,
-        performedBy: state.activeUserName || 'מנהל מחלקה',
-        approvalStatus: 'approved'
-      });
-
-      closeModal('permissionsModal');
-      showToast('הגדרות ההרשאות נשמרו וסונכרנו לכל המכשירים!', 'success');
     };
 
-    window.renderQuickRemoveList = function() {
-      const q = (document.getElementById('quickRemoveSearch')?.value || '').trim().toLowerCase();
-      const box = document.getElementById('quickRemoveResults');
-      if (!box) return;
-      if (!q) {
-        box.classList.add('hidden');
-        box.innerHTML = '';
-        return;
-      }
-
-      const matches = state.equipment.filter(e =>
-        `${e.inventoryNumber} ${e.type} ${e.model} ${e.room}`.toLowerCase().includes(q)
-      ).slice(0, 15);
-
-      box.classList.remove('hidden');
-      if (matches.length === 0) {
-        box.innerHTML = '<div class="p-3 text-center text-xs text-slate-400">לא נמצא מכשיר תואם</div>';
-        return;
-      }
-
-      box.innerHTML = matches.map(eq => `
-        <div class="flex items-center justify-between gap-2 px-3 py-2 text-xs hover:bg-red-50/60">
-          <div class="min-w-0">
-            <span class="font-extrabold text-medical-dark">#${escapeHtml(eq.inventoryNumber)}</span>
-            <span class="text-slate-700 font-semibold mr-1">${escapeHtml(eq.type)}</span>
-            ${eq.room ? `<span class="text-slate-400 mr-1">(${escapeHtml(eq.room)})</span>` : ''}
-          </div>
-          <button onclick="confirmDeleteEquipment('${escapeHtml(eq.id)}')" class="shrink-0 bg-red-600 hover:bg-red-700 text-white font-bold px-2.5 py-1 rounded-lg transition">
-            <i class="fa-solid fa-trash-can ml-1"></i>הסר
-          </button>
-        </div>
-      `).join('');
-    };
-
-    // ==================== ADD / EDIT / DELETE EQUIPMENT ====================
     window.openAddEditModal = function(eqId) {
       if (!state.isManager) return;
-      const eq = eqId ? state.equipment.find(e => e.id === eqId) : null;
-      document.getElementById('editEqId').value = eq ? eq.id : '';
-      document.getElementById('addEditModalTitle').querySelector('span').textContent = eq ? `עריכת מכשיר #${eq.inventoryNumber}` : 'הוספת מכשיר חדש למאגר';
-      document.getElementById('deleteEqBtn').classList.toggle('hidden', !eq);
-      document.getElementById('addEditError').classList.add('hidden');
+      const errEl = document.getElementById('addEditError');
+      errEl.classList.add('hidden');
+      const deleteBtn = document.getElementById('deleteEqBtn');
+      const titleSpan = document.getElementById('addEditModalTitle').querySelector('span');
 
-      document.getElementById('eqInvNum').value = eq?.inventoryNumber || '';
-      document.getElementById('eqType').value = eq?.type || '';
-      document.getElementById('eqDesc').value = eq?.description || '';
-      document.getElementById('eqManufacturer').value = eq?.manufacturer || '';
-      document.getElementById('eqModel').value = eq?.model || '';
-      document.getElementById('eqSerial').value = eq?.serialNumber || '';
-      document.getElementById('eqUnit').value = eq?.unit || 'פגייה - טיפול נמרץ ילודים';
-      document.getElementById('eqStatus').value = eq?.status || 'תקין';
-      document.getElementById('eqStatusDetails').value = eq?.statusDetails || '';
-      document.getElementById('eqRoom').value = eq?.room || '';
-      document.getElementById('eqLocation').value = eq?.location || '';
-      document.getElementById('eqMaintFreq').value = eq?.maintFreqDays || 365;
-      document.getElementById('eqLastMaint').value = eq?.lastMaintDate || '';
-      document.getElementById('eqNextMaint').value = eq?.nextMaintDate || '';
-      document.getElementById('eqLastFilter').value = eq?.lastFilterDate || '';
-      document.getElementById('eqNextFilter').value = eq?.nextFilterDate || '';
+      if (eqId) {
+        const eq = state.equipment.find(e => e.id === eqId);
+        if (!eq) return;
+        titleSpan.textContent = `עריכת מכשיר #${eq.inventoryNumber}`;
+        document.getElementById('editEqId').value = eq.id;
+        document.getElementById('eqInvNum').value = eq.inventoryNumber || '';
+        document.getElementById('eqType').value = eq.type || '';
+        document.getElementById('eqDesc').value = eq.description || '';
+        document.getElementById('eqManufacturer').value = eq.manufacturer || '';
+        document.getElementById('eqModel').value = eq.model || '';
+        document.getElementById('eqSerial').value = eq.serialNumber || '';
+        document.getElementById('eqUnit').value = eq.unit || 'פגייה - טיפול נמרץ ילודים';
+        document.getElementById('eqStatus').value = eq.status || 'תקין';
+        document.getElementById('eqStatusDetails').value = eq.statusDetails || '';
+        document.getElementById('eqRoom').value = eq.room || '';
+        document.getElementById('eqLocation').value = eq.location || '';
+        document.getElementById('eqMaintFreq').value = eq.maintFreqDays || 365;
+        document.getElementById('eqLastMaint').value = eq.lastMaintDate || '';
+        document.getElementById('eqNextMaint').value = eq.nextMaintDate || '';
+        document.getElementById('eqLastFilter').value = eq.lastFilterDate || '';
+        document.getElementById('eqNextFilter').value = eq.nextFilterDate || '';
+        deleteBtn.classList.remove('hidden');
+      } else {
+        titleSpan.textContent = 'הוספת מכשיר חדש';
+        document.getElementById('editEqId').value = '';
+        document.getElementById('eqInvNum').value = '';
+        document.getElementById('eqType').value = '';
+        document.getElementById('eqDesc').value = '';
+        document.getElementById('eqManufacturer').value = '';
+        document.getElementById('eqModel').value = '';
+        document.getElementById('eqSerial').value = '';
+        document.getElementById('eqUnit').value = 'פגייה - טיפול נמרץ ילודים';
+        document.getElementById('eqStatus').value = 'תקין';
+        document.getElementById('eqStatusDetails').value = '';
+        document.getElementById('eqRoom').value = '';
+        document.getElementById('eqLocation').value = '';
+        document.getElementById('eqMaintFreq').value = 365;
+        document.getElementById('eqLastMaint').value = '';
+        document.getElementById('eqNextMaint').value = '';
+        document.getElementById('eqLastFilter').value = '';
+        document.getElementById('eqNextFilter').value = '';
+        deleteBtn.classList.add('hidden');
+      }
 
       document.getElementById('addEditModal').classList.remove('hidden');
     };
 
     window.autoCalcNextFilterInput = function() {
-      const last = document.getElementById('eqLastFilter').value;
-      if (last) {
-        document.getElementById('eqNextFilter').value = addDaysToIso(last, 90);
+      const lastVal = document.getElementById('eqLastFilter').value;
+      if (lastVal) {
+        document.getElementById('eqNextFilter').value = addDaysToIso(lastVal, 90);
       }
     };
 
@@ -2994,20 +3027,27 @@
         nextFilterDate: document.getElementById('eqNextFilter').value
       };
 
-      await saveEquipmentRecord(record);
-      await appendActivityLog({
-        category: 'admin',
-        equipmentId: id,
-        inventoryNumber: invNum,
-        equipmentType: type,
-        actionType: existingId ? 'עריכת פרטי מכשיר' : 'הוספת מכשיר חדש',
-        details: `${type} (${record.room || 'ללא חדר'})`,
-        performedBy: state.activeUserName || 'מנהל מחלקה',
-        approvalStatus: 'approved'
-      });
+      try {
+        const actionDesc = existingId ? `עריכת מכשיר #${invNum}` : `הוספת מכשיר חדש #${invNum}`;
+        await saveEquipmentRecord(record, actionDesc);
+        await appendActivityLog({
+          category: 'admin',
+          equipmentId: id,
+          inventoryNumber: invNum,
+          equipmentType: type,
+          actionType: existingId ? 'עריכת פרטי מכשיר' : 'הוספת מכשיר חדש',
+          details: `${type} (${record.room || 'ללא חדר'})`,
+          performedBy: state.activeUserName || 'מנהל מחלקה',
+          approvalStatus: 'approved'
+        });
 
-      closeModal('addEditModal');
-      showToast(existingId ? 'פרטי המכשיר עודכנו בהצלחה' : 'מכשיר חדש נוסף למאגר!', 'success');
+        closeModal('addEditModal');
+        showToast(existingId ? 'פרטי המכשיר עודכנו וסונכרנו לכל הצוות!' : 'מכשיר חדש נוסף וסונכרן לכל הצוות!', 'success');
+      } catch (err) {
+        console.error('Save equipment error:', err);
+        errEl.textContent = 'שגיאה בשמירת המכשיר בענן. נסה שוב.';
+        errEl.classList.remove('hidden');
+      }
     };
 
     window.confirmDeleteEquipment = function(eqId) {
@@ -3018,20 +3058,25 @@
         'מחיקת / גריעת מכשיר',
         `האם אתה בטוח שברצונך למחוק את המכשיר #${eq.inventoryNumber} (${eq.type}) ממאגר האינוונטר?`,
         async () => {
-          await deleteEquipmentRecord(eqId);
-          await appendActivityLog({
-            category: 'admin',
-            equipmentId: eqId,
-            inventoryNumber: eq.inventoryNumber,
-            equipmentType: eq.type,
-            actionType: 'מחיקת / גריעת מכשיר',
-            details: `הוסר מהמאגר: ${eq.type} (${eq.model || ''})`,
-            performedBy: state.activeUserName || 'מנהל מחלקה',
-            approvalStatus: 'approved'
-          });
-          closeModal('addEditModal');
-          renderQuickRemoveList();
-          showToast(`המכשיר #${eq.inventoryNumber} הוסר מהמאגר`, 'info');
+          try {
+            await deleteEquipmentRecord(eqId, `הסרת מכשיר #${eq.inventoryNumber}`);
+            await appendActivityLog({
+              category: 'admin',
+              equipmentId: eqId,
+              inventoryNumber: eq.inventoryNumber,
+              equipmentType: eq.type,
+              actionType: 'מחיקת / גריעת מכשיר',
+              details: `הוסר מהמאגר: ${eq.type} (${eq.model || ''})`,
+              performedBy: state.activeUserName || 'מנהל מחלקה',
+              approvalStatus: 'approved'
+            });
+            closeModal('addEditModal');
+            renderQuickRemoveList();
+            showToast(`המכשיר #${eq.inventoryNumber} הוסר וסונכרן לכל הצוות`, 'info');
+          } catch (err) {
+            console.error('Delete equipment error:', err);
+            showToast('שגיאה במחיקת המכשיר מהענן', 'error');
+          }
         }
       );
     };
@@ -3114,7 +3159,9 @@
     };
 
     window.processStaffFileUpload = async function() {
-      const file = document.getElementById('staffFileInput').files?.[0];
+      if (!state.isManager) return;
+      const fileInput = document.getElementById('staffFileInput');
+      const file = fileInput.files?.[0];
       if (!file) {
         showToast('אנא בחר/י קובץ אנשי צוות (Excel / CSV / TXT)', 'warning');
         return;
@@ -3131,46 +3178,165 @@
           const wb = XLSX.read(buf, { type: 'array' });
           const ws = wb.Sheets[wb.SheetNames[0]];
           const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
           if (rows.length > 0) {
-            const firstRow = rows[0].map(c => String(c).trim());
-            const hasHeader = firstRow.some(h => h.includes('שם') || h.toLowerCase().includes('name'));
+            const firstRow = rows[0].map(c => String(c || '').trim());
+            const hasHeader = firstRow.some(c =>
+              c.includes('שם') || c.includes('עובד') || c.includes('תפקיד') || c.toLowerCase().includes('name')
+            );
             const startIdx = hasHeader ? 1 : 0;
-            const nameIdx = firstRow.findIndex(h => h.includes('שם מלא') || h === 'שם' || h.includes('שם פרטי') || h.toLowerCase().includes('name'));
-            const lastIdx = firstRow.findIndex(h => h.includes('משפחה'));
-            const roleIdx = firstRow.findIndex(h => h.includes('תפקיד') || h.toLowerCase().includes('role'));
+            const idxFull = hasHeader ? firstRow.findIndex(c => c.includes('שם מלא') || c.toLowerCase().includes('full')) : -1;
+            const idxFirst = hasHeader ? firstRow.findIndex(c => c.includes('שם פרטי') || c === 'שם' || c.toLowerCase().includes('first')) : 0;
+            const idxLast = hasHeader ? firstRow.findIndex(c => c.includes('משפחה') || c.toLowerCase().includes('last')) : -1;
+            const idxRole = hasHeader ? firstRow.findIndex(c => c.includes('תפקיד') || c.includes('הרשאה') || c.toLowerCase().includes('role')) : -1;
 
             for (let i = startIdx; i < rows.length; i++) {
               const r = rows[i];
-              const base = String(r[nameIdx >= 0 ? nameIdx : 0] || '').trim();
-              const last = lastIdx >= 0 ? String(r[lastIdx] || '').trim() : '';
-              const roleStr = roleIdx >= 0 ? String(r[roleIdx] || '').trim() : '';
-              const fullName = [base, last].filter(Boolean).join(' ') + (roleStr ? ` (${roleStr})` : '');
-              if (fullName.trim()) importedNames.push(fullName.trim());
+              let name = '';
+              if (idxFull >= 0 && String(r[idxFull] || '').trim()) {
+                name = String(r[idxFull]).trim();
+              } else {
+                const p1 = idxFirst >= 0 ? String(r[idxFirst] || '').trim() : String(r[0] || '').trim();
+                const p2 = idxLast >= 0 ? String(r[idxLast] || '').trim() : '';
+                name = [p1, p2].filter(Boolean).join(' ').trim();
+              }
+              if (!name) continue;
+              const roleText = idxRole >= 0 ? String(r[idxRole] || '').trim() : '';
+              if (roleText && !name.includes('(')) {
+                name = `${name} (${roleText})`;
+              }
+              importedNames.push(name);
             }
           }
         }
 
+        importedNames = Array.from(new Set(importedNames));
         if (importedNames.length === 0) {
           showToast('לא נמצאו שמות תקינים בקובץ שנבחר', 'error');
           return;
         }
 
         if (mode === 'replace') {
-          state.staffList = Array.from(new Set(importedNames)).sort((a, b) => a.localeCompare(b, 'he'));
+          state.staffList = [...importedNames];
+          state.staffRoles = {};
         } else {
-          state.staffList = Array.from(new Set([...state.staffList, ...importedNames])).sort((a, b) => a.localeCompare(b, 'he'));
+          state.staffList = Array.from(new Set([...state.staffList, ...importedNames]));
         }
+        state.staffList.sort((a, b) => a.localeCompare(b, 'he'));
 
         await persistStaffList();
-        document.getElementById('staffFileInput').value = '';
-        showToast(`יובאו בהצלחה ${importedNames.length} אנשי צוות!`, 'success');
+        await appendActivityLog({
+          category: 'admin',
+          inventoryNumber: 'STAFF',
+          equipmentType: 'רשימת צוות',
+          actionType: 'ייבוא קובץ צוות',
+          details: `יובאו ${importedNames.length} אנשי צוות מקובץ ${file.name}`,
+          performedBy: state.activeUserName || 'מנהל מחלקה',
+          approvalStatus: 'approved'
+        });
+
+        fileInput.value = '';
+        showToast(`יובאו בהצלחה ${importedNames.length} אנשי צוות וסונכרנו לכל המכשירים!`, 'success');
       } catch (err) {
-        console.error(err);
-        showToast('שגיאה בקריאת קובץ הצוות', 'error');
+        console.error('Staff file upload error:', err);
+        showToast('שגיאה בקריאת קובץ הצוות. ודא/י שהקובץ תקין.', 'error');
       }
     };
 
-    // ==================== USER SELECTION MODAL ====================
+    // ==================== MANAGER PERMISSIONS MODAL ====================
+    window.openPermissionsModal = function() {
+      if (!state.isManager) return;
+      document.getElementById('permAllowStatus').checked = !!state.permissions.allowStaffStatusUpdate;
+      document.getElementById('permAllowFilter').checked = !!state.permissions.allowStaffFilterReplace;
+      document.getElementById('permAllowExport').checked = !!state.permissions.allowStaffExportExcel;
+      document.getElementById('permAllowFreeText').checked = !!state.permissions.allowFreeTextUser;
+      document.getElementById('permRequireApproval').checked = !!state.permissions.requireManagerApproval;
+      updatePendingLogBadges();
+      const qInput = document.getElementById('quickRemoveSearch');
+      if (qInput) qInput.value = '';
+      const qRes = document.getElementById('quickRemoveResults');
+      if (qRes) {
+        qRes.innerHTML = '';
+        qRes.classList.add('hidden');
+      }
+      document.getElementById('permissionsModal').classList.remove('hidden');
+    };
+
+    window.renderQuickRemoveList = function() {
+      const input = document.getElementById('quickRemoveSearch');
+      const resEl = document.getElementById('quickRemoveResults');
+      if (!input || !resEl) return;
+      const q = input.value.trim().toLowerCase();
+      if (!q) {
+        resEl.innerHTML = '';
+        resEl.classList.add('hidden');
+        return;
+      }
+
+      const matches = state.equipment.filter(eq => {
+        const hay = `${eq.inventoryNumber || ''} ${eq.type || ''} ${eq.model || ''} ${eq.room || ''}`.toLowerCase();
+        return hay.includes(q);
+      }).slice(0, 15);
+
+      resEl.classList.remove('hidden');
+      if (matches.length === 0) {
+        resEl.innerHTML = '<div class="p-3 text-center text-xs text-slate-400">לא נמצאו מכשירים תואמים</div>';
+        return;
+      }
+
+      resEl.innerHTML = matches.map(eq => `
+        <div class="flex items-center justify-between gap-2 px-3 py-2 text-xs hover:bg-red-50/60">
+          <div class="truncate">
+            <span class="font-extrabold text-medical-dark">#${escapeHtml(eq.inventoryNumber)}</span>
+            <span class="text-slate-700 font-semibold mr-1">${escapeHtml(eq.type)}</span>
+            ${eq.room ? `<span class="text-slate-400">(${escapeHtml(eq.room)})</span>` : ''}
+          </div>
+          <button onclick="confirmDeleteEquipment('${escapeHtml(eq.id)}')" class="bg-red-600 hover:bg-red-700 text-white font-bold px-2.5 py-1 rounded-lg shrink-0">
+            <i class="fa-solid fa-trash-can ml-1"></i>הסר
+          </button>
+        </div>
+      `).join('');
+    };
+
+    window.saveSystemPermissions = async function() {
+      if (!state.isManager) return;
+      state.permissions = {
+        allowStaffStatusUpdate: document.getElementById('permAllowStatus').checked,
+        allowStaffFilterReplace: document.getElementById('permAllowFilter').checked,
+        allowStaffExportExcel: document.getElementById('permAllowExport').checked,
+        allowFreeTextUser: document.getElementById('permAllowFreeText').checked,
+        requireManagerApproval: document.getElementById('permRequireApproval').checked
+      };
+
+      try {
+        if (useCloud && currentUser && db) {
+          await setDoc(getPublicDoc('settings', 'permissions'), {
+            ...state.permissions,
+            updatedAt: Date.now(),
+            updatedBy: state.activeUserName || 'מנהל מחלקה'
+          });
+          await touchSharedMeta('עדכון הרשאות מערכת');
+        }
+
+        await appendActivityLog({
+          category: 'admin',
+          inventoryNumber: 'PERMS',
+          equipmentType: 'הרשאות מערכת',
+          actionType: 'עדכון הרשאות מנהל',
+          details: `עודכנו הרשאות מערכת (עדכון סטטוס: ${state.permissions.allowStaffStatusUpdate ? 'כן' : 'לא'}, פילטרים: ${state.permissions.allowStaffFilterReplace ? 'כן' : 'לא'}, ייצוא: ${state.permissions.allowStaffExportExcel ? 'כן' : 'לא'}, אישור מנהל: ${state.permissions.requireManagerApproval ? 'נדרש' : 'אוטומטי'})`,
+          performedBy: state.activeUserName || 'מנהל מחלקה',
+          approvalStatus: 'approved'
+        });
+
+        closeModal('permissionsModal');
+        showToast('הגדרות ההרשאות נשמרו וסונכרנו לכל המכשירים!', 'success');
+      } catch (err) {
+        console.error('Save permissions error:', err);
+        showToast('שגיאה בשמירת ההרשאות בענן', 'error');
+      }
+    };
+
+    // ==================== USER IDENTITY MODAL ====================
     window.openUserModal = function() {
       populateStaffDropdowns();
       const allowFree = state.isManager || state.permissions.allowFreeTextUser;
@@ -3302,7 +3468,7 @@
           for (let i = 0; i < parsedItems.length; i += 400) {
             const batch = writeBatch(db);
             parsedItems.slice(i, i + 400).forEach(item => {
-              batch.set(getPublicDoc('equipment', item.id), item, { merge: true });
+              batch.set(getPublicDoc('equipment', item.id), cleanForFirestore(item), { merge: true });
             });
             await batch.commit();
           }
@@ -3316,7 +3482,7 @@
             }
           }
 
-          await setDoc(getPublicDoc('settings', 'meta'), { initialized: true, lastImportAt: Date.now() }, { merge: true });
+          await touchSharedMeta(`ייבוא אקסל (${parsedItems.length} פריטים)`);
           isImporting = false;
           state.equipment = mode === 'replace'
             ? parsedItems
@@ -3326,7 +3492,6 @@
           state.equipment = mode === 'replace'
             ? parsedItems
             : Array.from(new Map([...state.equipment, ...parsedItems].map(x => [x.id, x])).values());
-          saveLocalState();
           refreshAllViews();
         }
 
