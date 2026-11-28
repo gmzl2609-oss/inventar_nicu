@@ -271,6 +271,7 @@
               <option value="">כל הסטטוסים</option>
               <option value="תקין">תקין / פעיל במחלקה</option>
               <option value="הנדסה רפואית">תקלה / הנדסה רפואית</option>
+              <option value="העברה למחלקה אחרת">העברה למחלקה אחרת</option>
               <option value="שליחה עם מטופל">שליחה עם מטופל לב"ח אחר</option>
               <option value="השאלה">השאלה לב"ח אחר</option>
               <option value="מושבת">מושבת</option>
@@ -631,8 +632,9 @@
           <select id="statusActionSelect" onchange="onStatusActionChange()" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm font-semibold bg-white focus:border-medical-teal outline-none">
             <option value="תקין">✅ תקין / פעיל במחלקה (עדכון חדר/אשכול)</option>
             <option value="הנדסה רפואית">🔧 דיווח על תקלה והעברה להנדסה רפואית</option>
+            <option value="העברה למחלקה אחרת">🔄 העברה למחלקה אחרת בבית החולים</option>
             <option value="שליחה עם מטופל">🚑 שליחה עם מטופל לבית חולים אחר</option>
-            <option value="השאלה">🏥 השאלת מכשיר לבית חולים אחר</option>
+            <option value="השאלה">🏥 השאלת מכשיר למחלקה / בית חולים אחר</option>
             <option value="מושבת">⛔ השבתת מכשיר</option>
             <option value="החזרה">↩️ החזרת מכשיר למחלקה (לסטטוס תקין)</option>
           </select>
@@ -648,14 +650,18 @@
           <textarea id="statusFaultDesc" rows="2" placeholder="פרט/י את מהות התקלה..." class="w-full px-3 py-2 rounded-xl border border-red-300 text-sm focus:border-red-500 outline-none"></textarea>
         </div>
 
-        <div id="fieldHospitalWrap" class="hidden space-y-2.5">
+        <div id="fieldHospitalWrap" class="hidden space-y-2.5 bg-sky-50/70 border border-sky-200 rounded-xl p-3">
           <div>
-            <label id="hospitalFieldLabel" class="block text-xs font-bold text-slate-700 mb-1">בית החולים המקבל / השואל:</label>
-            <input type="text" id="statusHospitalName" placeholder="שם בית החולים..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:border-medical-teal outline-none" />
+            <label id="hospitalFieldLabel" class="block text-xs font-bold text-medical-dark mb-1">לאיזו מחלקה / בית חולים הועבר? (שדה חובה *):</label>
+            <input type="text" id="statusHospitalName" placeholder="הזן/י שם מחלקה או בית חולים..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-white text-sm focus:border-medical-teal outline-none" />
           </div>
           <div>
-            <label id="hospitalExtraLabel" class="block text-xs font-bold text-slate-700 mb-1">תאריך שליחה / איש קשר והערה:</label>
-            <input type="text" id="statusHospitalExtra" placeholder="תאריך או שם איש קשר..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm focus:border-medical-teal outline-none" />
+            <label class="block text-xs font-bold text-medical-dark mb-1">שם איש קשר (שדה חובה *):</label>
+            <input type="text" id="statusContactName" placeholder="שם מלא של איש/אשת הקשר המקבל/ת..." class="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-white text-sm focus:border-medical-teal outline-none" />
+          </div>
+          <div>
+            <label id="hospitalExtraLabel" class="block text-xs font-bold text-slate-600 mb-1">תאריך / טלפון / הערות נוספות (אופציונלי):</label>
+            <input type="text" id="statusHospitalExtra" placeholder="תאריך שליחה, טלפון או הערה..." class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white text-sm focus:border-medical-teal outline-none" />
           </div>
         </div>
 
@@ -807,6 +813,7 @@
           <select id="eqStatus" class="w-full px-3 py-2 rounded-xl border border-slate-300 bg-white outline-none focus:border-medical-teal font-semibold">
             <option value="תקין">תקין</option>
             <option value="הנדסה רפואית">הנדסה רפואית</option>
+            <option value="העברה למחלקה אחרת">העברה למחלקה אחרת</option>
             <option value="שליחה עם מטופל">שליחה עם מטופל</option>
             <option value="השאלה">השאלה</option>
             <option value="מושבת">מושבת</option>
@@ -1636,6 +1643,17 @@
     }
 
     // ==================== FIREBASE CLOUD SYNC ====================
+    // הגדרת חיבור ענן עבור פריסה חיצונית (כגון Vercel):
+    // הדבק/י כאן את פרטי פרויקט ה-Firebase שלך כדי שכל המכשירים ב-Vercel יסתנכרנו לאותו מסד נתונים.
+    const CUSTOM_FIREBASE_CONFIG = {
+      apiKey: "",
+      authDomain: "",
+      projectId: "",
+      storageBucket: "",
+      messagingSenderId: "",
+      appId: ""
+    };
+
     function getPublicCollection(colName) {
       return collection(db, 'artifacts', appId, 'public', 'data', colName);
     }
@@ -1674,11 +1692,16 @@
 
     async function initFirebaseAndData() {
       try {
-        const configStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
-        if (!configStr) {
+        const envConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+        let firebaseConfig = null;
+        if (envConfigStr) {
+          firebaseConfig = typeof envConfigStr === 'string' ? JSON.parse(envConfigStr) : envConfigStr;
+        } else if (CUSTOM_FIREBASE_CONFIG && CUSTOM_FIREBASE_CONFIG.apiKey && CUSTOM_FIREBASE_CONFIG.projectId) {
+          firebaseConfig = CUSTOM_FIREBASE_CONFIG;
+        }
+        if (!firebaseConfig) {
           throw new Error('No cloud config');
         }
-        const firebaseConfig = typeof configStr === 'string' ? JSON.parse(configStr) : configStr;
         const app = initializeApp(firebaseConfig);
         auth = getAuth(app);
         db = getFirestore(app);
@@ -2068,6 +2091,9 @@
       if (s === 'הנדסה רפואית') {
         return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-red-100 text-red-800"><i class="fa-solid fa-wrench"></i>הנדסה רפואית</span>`;
       }
+      if (s === 'העברה למחלקה אחרת') {
+        return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-purple-100 text-purple-900"><i class="fa-solid fa-right-left"></i>העברה למחלקה אחרת</span>`;
+      }
       if (s === 'שליחה עם מטופל') {
         return `<span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-amber-100 text-amber-900"><i class="fa-solid fa-truck-medical"></i>שליחה עם מטופל</span>`;
       }
@@ -2339,7 +2365,7 @@
     window.renderDashboard = function() {
       // KPIs
       const total = state.equipment.length;
-      const outCount = state.equipment.filter(e => ['הנדסה רפואית', 'שליחה עם מטופל', 'השאלה'].includes((e.status || '').trim())).length;
+      const outCount = state.equipment.filter(e => ['הנדסה רפואית', 'העברה למחלקה אחרת', 'שליחה עם מטופל', 'השאלה'].includes((e.status || '').trim())).length;
       const closedIncs = state.equipment.filter(e => FILTER_INCUBATOR_TYPES.includes((e.type || '').trim()));
       const incGreen = closedIncs.filter(e => getFilterTrafficStatus(e).level === 'green').length;
       const incDue = closedIncs.length - incGreen;
@@ -2480,10 +2506,11 @@
 
       document.getElementById('statusEqId').value = eq.id;
       document.getElementById('statusModalSubtitle').textContent = `#${eq.inventoryNumber} • ${eq.type} (${eq.room || 'ללא חדר'})`;
-      document.getElementById('statusActionSelect').value = eq.status && ['תקין', 'הנדסה רפואית', 'שליחה עם מטופל', 'השאלה', 'מושבת'].includes(eq.status) ? eq.status : 'תקין';
+      document.getElementById('statusActionSelect').value = eq.status && ['תקין', 'הנדסה רפואית', 'העברה למחלקה אחרת', 'שליחה עם מטופל', 'השאלה', 'מושבת'].includes(eq.status) ? eq.status : 'תקין';
       document.getElementById('statusNewLocation').value = [eq.room, eq.location].filter(Boolean).join(' / ');
       document.getElementById('statusFaultDesc').value = '';
       document.getElementById('statusHospitalName').value = '';
+      document.getElementById('statusContactName').value = '';
       document.getElementById('statusHospitalExtra').value = '';
       document.getElementById('statusDecommissionReason').value = '';
       document.getElementById('statusPerformerName').value = state.activeUserName || '';
@@ -2494,17 +2521,21 @@
 
     window.onStatusActionChange = function() {
       const action = document.getElementById('statusActionSelect').value;
+      const isTransfer = ['העברה למחלקה אחרת', 'שליחה עם מטופל', 'השאלה'].includes(action);
       document.getElementById('fieldLocationWrap').classList.toggle('hidden', !['תקין', 'החזרה'].includes(action));
       document.getElementById('fieldFaultWrap').classList.toggle('hidden', action !== 'הנדסה רפואית');
-      document.getElementById('fieldHospitalWrap').classList.toggle('hidden', !['שליחה עם מטופל', 'השאלה'].includes(action));
+      document.getElementById('fieldHospitalWrap').classList.toggle('hidden', !isTransfer);
       document.getElementById('fieldDecommissionWrap').classList.toggle('hidden', action !== 'מושבת');
 
-      if (action === 'שליחה עם מטופל') {
-        document.getElementById('hospitalFieldLabel').textContent = 'בית החולים המקבל:';
-        document.getElementById('hospitalExtraLabel').textContent = 'תאריך שליחה והערה:';
+      if (action === 'העברה למחלקה אחרת') {
+        document.getElementById('hospitalFieldLabel').textContent = 'לאיזו מחלקה הועבר המכשיר? (שדה חובה *):';
+        document.getElementById('statusHospitalName').placeholder = 'לדוגמה: טיפול נמרץ ילדים / מחלקת ילדים א...';
+      } else if (action === 'שליחה עם מטופל') {
+        document.getElementById('hospitalFieldLabel').textContent = 'לאיזה בית חולים / מחלקה נשלח? (שדה חובה *):';
+        document.getElementById('statusHospitalName').placeholder = 'שם בית החולים המקבל...';
       } else if (action === 'השאלה') {
-        document.getElementById('hospitalFieldLabel').textContent = 'בית החולים השואל:';
-        document.getElementById('hospitalExtraLabel').textContent = 'איש קשר והערה:';
+        document.getElementById('hospitalFieldLabel').textContent = 'לאיזו מחלקה / בית חולים הושאל? (שדה חובה *):';
+        document.getElementById('statusHospitalName').placeholder = 'שם המחלקה או בית החולים השואל...';
       }
     };
 
@@ -2548,23 +2579,23 @@
         const fault = document.getElementById('statusFaultDesc').value.trim();
         if (!fault) {
           errEl.textContent = 'חובה לפרט את תיאור התקלה להעברה להנדסה רפואית.';
-          errEl.classList.remove('hidden');
-          return;
-        }
-        newRoom = 'הנדסה רפואית';
-        statusDetails = `תקלה: ${fault}`;
-        logActionLabel = 'דיווח תקלה להנדסה רפואית';
-        logDetails = statusDetails;
-      } else if (action === 'שליחה עם מטופל' || action === 'השאלה') {
-        const hosp = document.getElementById('statusHospitalName').value.trim();
+      } else if (['העברה למחלקה אחרת', 'שליחה עם מטופל', 'השאלה'].includes(action)) {
+        const dest = document.getElementById('statusHospitalName').value.trim();
+        const contact = document.getElementById('statusContactName').value.trim();
         const extra = document.getElementById('statusHospitalExtra').value.trim();
-        if (!hosp) {
-          errEl.textContent = 'חובה לציין את שם בית החולים.';
+        if (!dest) {
+          errEl.textContent = 'שדה חובה: יש לציין לאיזו מחלקה או בית חולים הועבר המכשיר.';
           errEl.classList.remove('hidden');
           return;
         }
-        newRoom = hosp;
-        statusDetails = `${action}: ${hosp}${extra ? ` (${extra})` : ''}`;
+        if (!contact) {
+          errEl.textContent = 'שדה חובה: יש להזין את שם איש הקשר.';
+          errEl.classList.remove('hidden');
+          return;
+        }
+        newRoom = dest;
+        newLocation = `איש קשר: ${contact}`;
+        statusDetails = `${action}: ${dest} | איש קשר: ${contact}${extra ? ` | ${extra}` : ''}`;
         logActionLabel = action;
         logDetails = statusDetails;
       } else if (action === 'מושבת') {
@@ -2585,83 +2616,56 @@
         statusDetails
       });
 
-      await appendActivityLog({
-        category: 'status',
-        equipmentId: eq.id,
-        inventoryNumber: eq.inventoryNumber,
-        equipmentType: eq.type,
-        actionType: logActionLabel,
-        details: logDetails,
-        performedBy: performer,
-        snapshotBefore
-      });
+    // Crop bottom strip of sticker (under barcode) & enhance contrast for accurate OCR
+    function createBottomBarcodeCropDataUrl(dataUrl) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          // Focus on the bottom 36% of the sticker where the barcode number (e.g., 948936) is printed
+          const cropY = Math.floor(img.height * 0.64);
+          const cropH = img.height - cropY;
+          const scale = 2; // Upscale for sharper OCR
+          canvas.width = img.width * scale;
+          canvas.height = cropH * scale;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, cropY, img.width, cropH, 0, 0, canvas.width, canvas.height);
 
-      closeModal('statusModal');
-      showToast('סטטוס ומיקום המכשיר עודכנו בהצלחה!', 'success');
-    };
-
-    // ==================== INCUBATOR FILTER SCANNER & OCR ====================
-    window.openFilterScannerModal = function(preselectedEqId) {
-      const perm = checkActionPermission('filter');
-      if (!perm.allowed) {
-        showToast(perm.message, 'error');
-        return;
-      }
-      state.scanMatchedEqId = null;
-      state.scanCapturedImageData = null;
-
-      document.getElementById('stickerFileInput').value = '';
-      document.getElementById('stickerPreviewImg').classList.add('hidden');
-      document.getElementById('ocrSpinner').classList.add('hidden');
-      document.getElementById('stickerBtnLabel').textContent = 'צלם / העלה תמונת מדבקה';
-      document.getElementById('ocrStatusMsg').textContent = 'התמונה תישמר כהוכחה בתיעוד ההחלפה';
-      document.getElementById('scanInvInput').value = '';
-      document.getElementById('scanResultBox').classList.add('hidden');
-      document.getElementById('filterConfirmForm').classList.add('hidden');
-      document.getElementById('filterFormError').classList.add('hidden');
-      document.getElementById('filterStaffInput').value = state.activeUserName || '';
-
-      // Populate closed incubators dropdown
-      const closedIncs = state.equipment.filter(e => FILTER_INCUBATOR_TYPES.includes((e.type || '').trim()));
-      const sel = document.getElementById('scanIncubatorSelect');
-      sel.innerHTML = '<option value="">-- או בחר/י מהרשימה --</option>' +
-        closedIncs.map(e => `<option value="${escapeHtml(e.id)}">#${escapeHtml(e.inventoryNumber)} - ${escapeHtml(e.room || e.type)}</option>`).join('');
-
-      populateStaffDropdowns();
-
-      if (preselectedEqId) {
-        sel.value = preselectedEqId;
-        onSelectIncubatorDropdown(preselectedEqId);
-      }
-
-      document.getElementById('filterScanModal').classList.remove('hidden');
-    };
-
-    function compressImageFile(file, maxWidth = 720, quality = 0.65) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const img = new Image();
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            let w = img.width;
-            let h = img.height;
-            if (w > maxWidth) {
-              h = Math.round((h * maxWidth) / w);
-              w = maxWidth;
-            }
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, w, h);
-            resolve(canvas.toDataURL('image/jpeg', quality));
-          };
-          img.onerror = reject;
-          img.src = e.target.result;
+          // High-contrast grayscale conversion (turns dark digits on yellow sticker into crisp black on white)
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const d = imgData.data;
+          for (let i = 0; i < d.length; i += 4) {
+            const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+            const val = lum < 125 ? 0 : 255;
+            d[i] = d[i + 1] = d[i + 2] = val;
+          }
+          ctx.putImageData(imgData, 0, 0);
+          resolve(canvas.toDataURL('image/png'));
         };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
+        img.onerror = () => resolve(null);
+        img.src = dataUrl;
       });
+    }
+
+    // Try native browser BarcodeDetector API first (supported on Android Chrome)
+    async function tryNativeBarcodeDetect(dataUrl) {
+      if (!('BarcodeDetector' in window)) return null;
+      try {
+        const detector = new window.BarcodeDetector({ formats: ['code_128', 'code_39', 'ean_13', 'ean_8', 'itf', 'codabar'] });
+        const img = new Image();
+        await new Promise((res, rej) => {
+          img.onload = res;
+          img.onerror = rej;
+          img.src = dataUrl;
+        });
+        const barcodes = await detector.detect(img);
+        if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+          return String(barcodes[0].rawValue).trim();
+        }
+      } catch (e) {
+        // Fallback to OCR
+      }
+      return null;
     }
 
     window.handleStickerImageUpload = async function(event) {
@@ -2673,46 +2677,73 @@
       const statusMsg = document.getElementById('ocrStatusMsg');
 
       try {
-        const compressedDataUrl = await compressImageFile(file);
+        const compressedDataUrl = await compressImageFile(file, 960, 0.8);
         state.scanCapturedImageData = compressedDataUrl;
         preview.src = compressedDataUrl;
         preview.classList.remove('hidden');
         document.getElementById('stickerBtnLabel').textContent = 'החלף תמונת מדבקה';
 
-        // Run Tesseract OCR to extract inventory number
-        if (window.Tesseract) {
-          spinner.classList.remove('hidden');
-          spinner.classList.add('flex');
-          statusMsg.textContent = 'מזהה מספרים מהמדבקה...';
+        spinner.classList.remove('hidden');
+        spinner.classList.add('flex');
+        statusMsg.textContent = 'קורא ברקוד ומספר אינוונטר תחתון...';
 
-          const { data: { text } } = await window.Tesseract.recognize(compressedDataUrl, 'eng');
-          const numbers = (text || '').match(/\d{4,}/g) || [];
-          const closedIncs = state.equipment.filter(e => FILTER_INCUBATOR_TYPES.includes((e.type || '').trim()));
+        const closedIncs = state.equipment.filter(e => FILTER_INCUBATOR_TYPES.includes((e.type || '').trim()));
+        let candidateNumbers = [];
 
-          let matched = null;
-          for (const num of numbers) {
-            matched = closedIncs.find(e => String(e.inventoryNumber).includes(num) || num.includes(String(e.inventoryNumber)));
-            if (matched) break;
+        // Stage 1: Native Barcode detection (fastest & most accurate for the barcode value)
+        const barcodeVal = await tryNativeBarcodeDetect(compressedDataUrl);
+        if (barcodeVal) {
+          const digitsOnly = barcodeVal.replace(/\D/g, '');
+          if (digitsOnly.length >= 4) candidateNumbers.push(digitsOnly);
+        }
+
+        // Stage 2: OCR specifically on the bottom strip underneath the barcode (ignores the top SAP number)
+        if (candidateNumbers.length === 0 && window.Tesseract) {
+          const bottomCrop = await createBottomBarcodeCropDataUrl(compressedDataUrl);
+          if (bottomCrop) {
+            const resBottom = await window.Tesseract.recognize(bottomCrop, 'eng', {
+              tessedit_char_whitelist: '0123456789'
+            });
+            const bottomNums = (resBottom?.data?.text || '').match(/\d{4,8}/g) || [];
+            // Take from bottom-most upward
+            candidateNumbers.push(...bottomNums.reverse());
           }
+        }
 
-          spinner.classList.add('hidden');
-          spinner.classList.remove('flex');
+        // Stage 3: Fallback full-image OCR (prefer bottom-most number and avoid 10-digit top catalog numbers)
+        if (candidateNumbers.length === 0 && window.Tesseract) {
+          const resFull = await window.Tesseract.recognize(compressedDataUrl, 'eng');
+          const allNums = (resFull?.data?.text || '').match(/\d{4,}/g) || [];
+          const shortNums = allNums.filter(n => n.length >= 4 && n.length <= 8).reverse();
+          const longNums = allNums.filter(n => n.length > 8).reverse();
+          candidateNumbers.push(...shortNums, ...longNums);
+        }
 
-          if (matched) {
-            document.getElementById('scanInvInput').value = matched.inventoryNumber;
-            document.getElementById('scanIncubatorSelect').value = matched.id;
-            displayMatchedIncubator(matched);
-            statusMsg.textContent = `זוהה אוטומטית אינקובטור #${matched.inventoryNumber}`;
-          } else if (numbers.length > 0) {
-            document.getElementById('scanInvInput').value = numbers[0];
-            matchIncubatorByNumber(numbers[0]);
-            statusMsg.textContent = `נקלט מספר ${numbers[0]} – אנא אמת/י או בחר/י מהרשימה`;
-          } else {
-            statusMsg.textContent = 'לא זוהה מספר אוטומטית – אנא הקלידי או בחרי אינקובטור מהרשימה.';
-          }
+        let matched = null;
+        for (const num of candidateNumbers) {
+          matched = closedIncs.find(e => String(e.inventoryNumber).trim() === num)
+            || closedIncs.find(e => String(e.inventoryNumber).includes(num) || num.includes(String(e.inventoryNumber)));
+          if (matched) break;
+        }
+
+        spinner.classList.add('hidden');
+        spinner.classList.remove('flex');
+
+        if (matched) {
+          document.getElementById('scanInvInput').value = matched.inventoryNumber;
+          document.getElementById('scanIncubatorSelect').value = matched.id;
+          displayMatchedIncubator(matched);
+          statusMsg.textContent = `זוהה אוטומטית מהברקוד: אינקובטור #${matched.inventoryNumber}`;
+        } else if (candidateNumbers.length > 0) {
+          document.getElementById('scanInvInput').value = candidateNumbers[0];
+          matchIncubatorByNumber(candidateNumbers[0]);
+          statusMsg.textContent = `נקלט מספר מתחת לברקוד: ${candidateNumbers[0]} – אנא אמת/י או בחר/י מהרשימה`;
+        } else {
+          statusMsg.textContent = 'לא זוהה מספר מתחת לברקוד – אנא הקלידי או בחרי אינקובטור מהרשימה.';
         }
       } catch (err) {
         spinner.classList.add('hidden');
+        spinner.classList.remove('flex');
         statusMsg.textContent = 'התמונה נשמרה. בחרי אינקובטור ידנית להמשך.';
       }
     };
