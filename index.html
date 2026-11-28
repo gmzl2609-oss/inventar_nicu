@@ -1644,14 +1644,13 @@
 
     // ==================== FIREBASE CLOUD SYNC ====================
     // הגדרת חיבור ענן עבור פריסה חיצונית (כגון Vercel):
-    // הדבק/י כאן את פרטי פרויקט ה-Firebase שלך כדי שכל המכשירים ב-Vercel יסתנכרנו לאותו מסד נתונים.
     const CUSTOM_FIREBASE_CONFIG = {
-      apiKey: "",
-      authDomain: "",
-      projectId: "",
-      storageBucket: "",
-      messagingSenderId: "",
-      appId: ""
+      apiKey: "AIzaSyATc9k1XDOfaDNEyyT8qhCtgI2tvJI7cVg",
+      authDomain: "nicu-inventory-soroka.firebaseapp.com",
+      projectId: "nicu-inventory-soroka",
+      storageBucket: "nicu-inventory-soroka.firebasestorage.app",
+      messagingSenderId: "477954953135",
+      appId: "1:477954953135:web:afba651704716dcb0f695a"
     };
 
     function getPublicCollection(colName) {
@@ -2579,6 +2578,14 @@
         const fault = document.getElementById('statusFaultDesc').value.trim();
         if (!fault) {
           errEl.textContent = 'חובה לפרט את תיאור התקלה להעברה להנדסה רפואית.';
+          errEl.classList.remove('hidden');
+          return;
+        }
+        newRoom = 'הנדסה רפואית';
+        newLocation = 'בתיקון / בדיקה';
+        statusDetails = `תקלה: ${fault}`;
+        logActionLabel = 'דיווח תקלה – הנדסה רפואית';
+        logDetails = statusDetails;
       } else if (['העברה למחלקה אחרת', 'שליחה עם מטופל', 'השאלה'].includes(action)) {
         const dest = document.getElementById('statusHospitalName').value.trim();
         const contact = document.getElementById('statusContactName').value.trim();
@@ -2608,13 +2615,97 @@
       state.activeUserName = performer;
       document.getElementById('headerUserName').textContent = performer;
 
-      await saveEquipmentRecord({
-        ...eq,
-        status: newStatus,
-        room: newRoom,
-        location: newLocation,
-        statusDetails
+      await saveEquipmentRecord(
+        {
+          ...eq,
+          status: newStatus,
+          room: newRoom,
+          location: newLocation,
+          statusDetails
+        },
+        `${logActionLabel} (#${eq.inventoryNumber})`
+      );
+
+      await appendActivityLog({
+        category: 'status',
+        equipmentId: eq.id,
+        inventoryNumber: eq.inventoryNumber,
+        equipmentType: eq.type,
+        actionType: logActionLabel,
+        details: logDetails,
+        performedBy: performer,
+        snapshotBefore
       });
+
+      closeModal('statusModal');
+      showToast(`המכשיר #${eq.inventoryNumber} עודכן וסונכרן בהצלחה!`, 'success');
+    };
+
+    // ==================== INCUBATOR FILTER SCANNER & OCR WORKFLOW ====================
+    window.openFilterScannerModal = function(preselectedEqId) {
+      const perm = checkActionPermission('filter');
+      if (!perm.allowed) {
+        showToast(perm.message, 'error');
+        return;
+      }
+
+      state.scanMatchedEqId = null;
+      state.scanCapturedImageData = null;
+
+      document.getElementById('stickerFileInput').value = '';
+      const preview = document.getElementById('stickerPreviewImg');
+      preview.src = '';
+      preview.classList.add('hidden');
+      document.getElementById('stickerBtnLabel').textContent = 'צלם / העלה תמונת מדבקה';
+      document.getElementById('ocrStatusMsg').textContent = 'התמונה תישמר כהוכחה בתיעוד ההחלפה';
+      document.getElementById('ocrSpinner').classList.add('hidden');
+      document.getElementById('ocrSpinner').classList.remove('flex');
+      document.getElementById('scanInvInput').value = '';
+      document.getElementById('scanResultBox').classList.add('hidden');
+      document.getElementById('filterConfirmForm').classList.add('hidden');
+      document.getElementById('filterFormError').classList.add('hidden');
+
+      populateStaffDropdowns();
+      document.getElementById('filterStaffSelect').value = state.staffList.includes(state.activeUserName) ? state.activeUserName : '';
+      document.getElementById('filterStaffInput').value = state.activeUserName || '';
+
+      const closedIncs = state.equipment
+        .filter(e => FILTER_INCUBATOR_TYPES.includes((e.type || '').trim()))
+        .sort((a, b) => String(a.inventoryNumber).localeCompare(String(b.inventoryNumber), 'he', { numeric: true }));
+
+      const sel = document.getElementById('scanIncubatorSelect');
+      sel.innerHTML = '<option value="">-- או בחר/י מהרשימה --</option>' +
+        closedIncs.map(e => `<option value="${escapeHtml(e.id)}">#${escapeHtml(e.inventoryNumber)} (${escapeHtml(e.room || e.type)})</option>`).join('');
+
+      if (preselectedEqId) {
+        sel.value = preselectedEqId;
+        onSelectIncubatorDropdown(preselectedEqId);
+      }
+
+      document.getElementById('filterScanModal').classList.remove('hidden');
+    };
+
+    function compressImageFile(file, maxWidth = 960, quality = 0.8) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            const ratio = Math.min(1, maxWidth / img.width);
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.round(img.width * ratio);
+            canvas.height = Math.round(img.height * ratio);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+          };
+          img.onerror = reject;
+          img.src = e.target.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
 
     // Crop bottom strip of sticker (under barcode) & enhance contrast for accurate OCR
     function createBottomBarcodeCropDataUrl(dataUrl) {
